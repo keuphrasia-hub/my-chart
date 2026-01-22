@@ -3,6 +3,14 @@ import { useState, useEffect } from 'react'
 // localStorage 키
 const STORAGE_KEY = 'hanuiwon_patients_v4'
 
+// 섹션 컴포넌트 (App 외부에 정의하여 리렌더링 시 재생성 방지)
+const Section = ({ title, children, className = '' }) => (
+  <div className={`bg-white p-6 rounded-xl shadow-sm border border-gray-100 ${className}`}>
+    <h3 className="font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-100">{title}</h3>
+    {children}
+  </div>
+)
+
 // 초기 데이터 로드
 const loadPatients = () => {
   const saved = localStorage.getItem(STORAGE_KEY)
@@ -338,14 +346,6 @@ function App() {
     reader.readAsText(file)
     event.target.value = '' // 같은 파일 다시 선택 가능하도록
   }
-
-  // 섹션 컴포넌트
-  const Section = ({ title, children, className = '' }) => (
-    <div className={`bg-white p-6 rounded-xl shadow-sm border border-gray-100 ${className}`}>
-      <h3 className="font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-100">{title}</h3>
-      {children}
-    </div>
-  )
 
   // 환자 목록 화면
   const renderPatientList = () => {
