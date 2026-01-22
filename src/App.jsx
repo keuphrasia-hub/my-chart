@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { getUserId, loadFromCloud, saveToCloud } from './supabase'
+import { getUserId, setUserId as setStoredUserId, loadFromCloud, saveToCloud, subscribeToChanges, unsubscribe } from './supabase'
 
 // localStorage 키
 const STORAGE_KEY = 'hanuiwon_patients_v4'
@@ -58,7 +58,12 @@ function App() {
     comment: '',
   })
 
-  // 초기 로드: 사용자 ID 설정 및 클라우드 데이터 로드
+  // Realtime 채널 참조
+  const channelRef = useRef(null)
+  // 내가 저장한 것인지 확인 (Realtime 무한루프 방지)
+  const isSavingRef = useRef(false)
+
+  // 초기 로드: 사용자 ID 설정 및 클라우드 데이터 로드 + Realtime 구독
   useEffect(() => {
     const initCloud = async () => {
       const id = getUserId()
@@ -87,26 +92,45 @@ function App() {
         }
       }
       setSyncStatus('synced')
+
+      // Realtime 구독 설정
+      channelRef.current = subscribeToChanges(id, (newData) => {
+        // 다른 기기에서 변경된 데이터 수신
+        if (!isSavingRef.current && Array.isArray(newData)) {
+          console.log('[App] Realtime 데이터 수신:', newData.length, '명')
+          setPatients(newData)
+          savePatients(newData)
+        }
+      })
     }
 
     initCloud()
+
+    // 컴포넌트 언마운트 시 구독 해제
+    return () => {
+      if (channelRef.current) {
+        unsubscribe(channelRef.current)
+      }
+    }
   }, [])
 
   // 환자 데이터 변경 시 localStorage + 클라우드에 저장 (디바운스)
   useEffect(() => {
     savePatients(patients)
 
-    // 클라우드 동기화 (2초 디바운스)
+    // 클라우드 동기화 (1초 디바운스)
     if (syncTimeoutRef.current) {
       clearTimeout(syncTimeoutRef.current)
     }
 
-    if (userId) {
+    if (userId && patients.length >= 0) {
       syncTimeoutRef.current = setTimeout(async () => {
         setSyncStatus('syncing')
+        isSavingRef.current = true // Realtime 무한루프 방지
         const success = await saveToCloud(userId, patients)
+        isSavingRef.current = false
         setSyncStatus(success ? 'synced' : 'error')
-      }, 2000)
+      }, 1000)
     }
 
     return () => {
