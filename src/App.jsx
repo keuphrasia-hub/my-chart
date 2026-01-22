@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { getUserId, loadFromCloud, saveToCloud } from './supabase'
 
 // localStorage 키
 const STORAGE_KEY = 'hanuiwon_patients_v4'
@@ -33,6 +34,12 @@ function App() {
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [listFilter, setListFilter] = useState('active')
 
+  // 클라우드 동기화 상태
+  const [syncStatus, setSyncStatus] = useState('idle') // idle, syncing, synced, error
+  const [userId, setUserId] = useState('')
+  const [showSyncModal, setShowSyncModal] = useState(false)
+  const syncTimeoutRef = useRef(null)
+
   // 새 환자 등록 폼 상태
   const [newPatient, setNewPatient] = useState({
     name: '',
@@ -51,10 +58,63 @@ function App() {
     comment: '',
   })
 
-  // 환자 데이터 변경 시 localStorage에 저장
+  // 초기 로드: 사용자 ID 설정 및 클라우드 데이터 로드
+  useEffect(() => {
+    const initCloud = async () => {
+      const id = getUserId()
+      setUserId(id)
+
+      // 클라우드에서 데이터 불러오기 시도
+      setSyncStatus('syncing')
+      const cloudData = await loadFromCloud(id)
+
+      if (cloudData && cloudData.length > 0) {
+        // 클라우드 데이터가 있으면 로컬과 병합 (클라우드 우선)
+        const localData = loadPatients()
+        if (localData.length === 0) {
+          setPatients(cloudData)
+          savePatients(cloudData)
+        } else {
+          // 로컬에도 데이터가 있으면 사용자에게 선택권 제공
+          const useCloud = confirm(
+            `클라우드에 ${cloudData.length}명, 로컬에 ${localData.length}명의 데이터가 있습니다.\n` +
+            `확인: 클라우드 데이터 사용\n취소: 로컬 데이터 유지`
+          )
+          if (useCloud) {
+            setPatients(cloudData)
+            savePatients(cloudData)
+          }
+        }
+      }
+      setSyncStatus('synced')
+    }
+
+    initCloud()
+  }, [])
+
+  // 환자 데이터 변경 시 localStorage + 클라우드에 저장 (디바운스)
   useEffect(() => {
     savePatients(patients)
-  }, [patients])
+
+    // 클라우드 동기화 (2초 디바운스)
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current)
+    }
+
+    if (userId) {
+      syncTimeoutRef.current = setTimeout(async () => {
+        setSyncStatus('syncing')
+        const success = await saveToCloud(userId, patients)
+        setSyncStatus(success ? 'synced' : 'error')
+      }, 2000)
+    }
+
+    return () => {
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current)
+      }
+    }
+  }, [patients, userId])
 
   // 새 환자 등록
   const handleAddPatient = () => {
@@ -1030,17 +1090,149 @@ function App() {
     )
   }
 
+  // 클라우드에서 강제 새로고침
+  const handleCloudRefresh = async () => {
+    if (!userId) return
+    setSyncStatus('syncing')
+    const cloudData = await loadFromCloud(userId)
+    if (cloudData) {
+      setPatients(cloudData)
+      savePatients(cloudData)
+      alert('클라우드에서 데이터를 불러왔습니다.')
+    } else {
+      alert('클라우드에 저장된 데이터가 없습니다.')
+    }
+    setSyncStatus('synced')
+  }
+
+  // 동기화 상태 아이콘
+  const getSyncIcon = () => {
+    switch (syncStatus) {
+      case 'syncing': return '↻'
+      case 'synced': return '✓'
+      case 'error': return '!'
+      default: return '○'
+    }
+  }
+
+  const getSyncColor = () => {
+    switch (syncStatus) {
+      case 'syncing': return 'text-yellow-600 animate-spin'
+      case 'synced': return 'text-green-600'
+      case 'error': return 'text-red-600'
+      default: return 'text-gray-400'
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* 동기화 설정 모달 */}
+      {showSyncModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full space-y-4">
+            <h3 className="text-lg font-semibold text-gray-900">클라우드 동기화 설정</h3>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">내 동기화 ID</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={userId}
+                  readOnly
+                  className="flex-1 px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm font-mono"
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(userId)
+                    alert('ID가 복사되었습니다.')
+                  }}
+                  className="px-3 py-2 bg-gray-200 rounded-lg text-sm hover:bg-gray-300"
+                >
+                  복사
+                </button>
+              </div>
+              <p className="text-xs text-gray-500">
+                다른 기기에서 이 ID를 입력하면 데이터를 동기화할 수 있습니다.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">다른 기기의 ID로 동기화</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="user_xxxxx..."
+                  id="otherUserId"
+                  className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono"
+                />
+                <button
+                  onClick={async () => {
+                    const otherId = document.getElementById('otherUserId').value.trim()
+                    if (!otherId) return
+
+                    if (confirm('다른 기기의 데이터로 현재 데이터를 덮어쓰시겠습니까?')) {
+                      localStorage.setItem('hanuiwon_user_id', otherId)
+                      setUserId(otherId)
+                      setSyncStatus('syncing')
+                      const cloudData = await loadFromCloud(otherId)
+                      if (cloudData) {
+                        setPatients(cloudData)
+                        savePatients(cloudData)
+                        alert('데이터를 동기화했습니다.')
+                      } else {
+                        alert('해당 ID의 데이터가 없습니다.')
+                      }
+                      setSyncStatus('synced')
+                      setShowSyncModal(false)
+                    }
+                  }}
+                  className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+                >
+                  동기화
+                </button>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-4 border-t">
+              <button
+                onClick={handleCloudRefresh}
+                className="flex-1 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm"
+              >
+                클라우드에서 불러오기
+              </button>
+              <button
+                onClick={() => setShowSyncModal(false)}
+                className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 헤더 */}
       <header className="bg-white shadow-sm border-b border-gray-100 sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <h1
-            className="text-2xl font-bold text-gray-900 cursor-pointer"
-            onClick={() => setView('list')}
-          >
-            한의원 환자 관리 차트
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1
+              className="text-2xl font-bold text-gray-900 cursor-pointer"
+              onClick={() => setView('list')}
+            >
+              한의원 환자 관리 차트
+            </h1>
+            {/* 동기화 상태 표시 */}
+            <button
+              onClick={() => setShowSyncModal(true)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs border ${getSyncColor()}`}
+              title="클라우드 동기화 설정"
+            >
+              <span className={syncStatus === 'syncing' ? 'animate-spin' : ''}>{getSyncIcon()}</span>
+              <span className="hidden sm:inline">
+                {syncStatus === 'syncing' ? '동기화 중' : syncStatus === 'synced' ? '동기화됨' : syncStatus === 'error' ? '오류' : '대기'}
+              </span>
+            </button>
+          </div>
           <div className="flex gap-2 flex-wrap">
             <button
               onClick={handleManualSave}
