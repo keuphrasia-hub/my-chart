@@ -1,18 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { getUserId, loadAllPatients, insertPatient, updatePatient as updatePatientInDB, deletePatientFromDB, subscribeToPatients, unsubscribe } from './supabase'
 
-// localStorage 키 (v10: 데이터 완전 초기화)
-const STORAGE_KEY = 'bonhyang_patients_v10'
-const MIGRATION_KEY = 'bonhyang_migrated_v10'
+// localStorage 키 (v11: 완전 초기화)
+const STORAGE_KEY = 'bonhyang_patients_v11'
+const MIGRATION_KEY = 'bonhyang_clean_v11'
 
-// 이전 버전 데이터 모두 삭제 (한 번만 실행)
-const clearOldData = () => {
-  if (localStorage.getItem(MIGRATION_KEY)) return // 이미 마이그레이션 완료
+// 모든 기존 데이터 삭제 (한 번만 실행)
+const clearAllOldData = () => {
+  if (localStorage.getItem(MIGRATION_KEY)) return
 
+  // bonhyang 관련 모든 키 삭제
   const keysToRemove = []
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
-    if (key && key.startsWith('bonhyang_patients_v') && key !== STORAGE_KEY) {
+    if (key && key.startsWith('bonhyang')) {
       keysToRemove.push(key)
     }
   }
@@ -20,8 +21,7 @@ const clearOldData = () => {
   localStorage.setItem(MIGRATION_KEY, 'true')
 }
 
-// 앱 시작 시 이전 데이터 삭제
-clearOldData()
+clearAllOldData()
 
 // 초기 데이터 로드
 const loadPatients = () => {
