@@ -125,69 +125,7 @@ function App() {
   const [isListCollapsed, setIsListCollapsed] = useState(false) // 목록 접기/펼치기
   const [visibleRows, setVisibleRows] = useState(10) // 표시할 행 수
 
-  const channelRef = useRef(null)
-  const isSavingRef = useRef(false)
-  const debounceRef = useRef(null)
-
-  // 비밀번호 확인
-  const handleLogin = (e) => {
-    e.preventDefault()
-    if (password === CORRECT_PASSWORD) {
-      sessionStorage.setItem(AUTH_KEY, 'true')
-      setIsAuthenticated(true)
-      setPasswordError(false)
-    } else {
-      setPasswordError(true)
-      setPassword('')
-    }
-  }
-
-  // 로그인 화면
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-stone-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-lg p-8 max-w-sm w-full">
-          <div className="flex flex-col items-center mb-6">
-            <img
-              src="/본향한의원세로형JPG.jpg"
-              alt="본향한의원"
-              className="h-20 w-auto mb-4"
-            />
-            <h1 className="text-xl font-bold text-stone-800">특화환자 관리</h1>
-            <p className="text-sm text-stone-500 mt-1">비밀번호를 입력하세요</p>
-          </div>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value)
-                  setPasswordError(false)
-                }}
-                placeholder="비밀번호"
-                className={`w-full px-4 py-3 border rounded-lg text-center text-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent ${
-                  passwordError ? 'border-red-500 bg-red-50' : 'border-stone-300'
-                }`}
-                autoFocus
-              />
-              {passwordError && (
-                <p className="text-red-500 text-sm text-center mt-2">비밀번호가 틀렸습니다</p>
-              )}
-            </div>
-            <button
-              type="submit"
-              className="w-full py-3 bg-stone-700 text-white rounded-lg hover:bg-stone-800 transition font-medium"
-            >
-              로그인
-            </button>
-          </form>
-        </div>
-      </div>
-    )
-  }
-
-  // 새 환자 폼
+  // 새 환자 폼 - 모든 hooks는 조건문 전에 선언
   const [newPatient, setNewPatient] = useState({
     doctor: '',
     firstVisitDate: getTodayDate(),
@@ -198,8 +136,14 @@ function App() {
     treatmentPeriod: '3개월 / 주2회',
   })
 
-  // 초기 로드
+  const channelRef = useRef(null)
+  const isSavingRef = useRef(false)
+  const debounceRef = useRef(null)
+
+  // 초기 로드 - 인증 후에도 실행되도록 isAuthenticated 의존성 추가
   useEffect(() => {
+    if (!isAuthenticated) return // 로그인 안됐으면 실행 안함
+
     const initCloud = async () => {
       const id = getUserId()
       setUserId(id)
@@ -282,7 +226,7 @@ function App() {
     return () => {
       if (channelRef.current) unsubscribe(channelRef.current)
     }
-  }, [])
+  }, [isAuthenticated])
 
   // 로컬 저장
   useEffect(() => {
@@ -431,6 +375,64 @@ function App() {
     }
   }
   const sync = getSyncStatus()
+
+  // 비밀번호 확인
+  const handleLogin = (e) => {
+    e.preventDefault()
+    if (password === CORRECT_PASSWORD) {
+      sessionStorage.setItem(AUTH_KEY, 'true')
+      setIsAuthenticated(true)
+      setPasswordError(false)
+    } else {
+      setPasswordError(true)
+      setPassword('')
+    }
+  }
+
+  // 로그인 화면
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-stone-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-lg p-8 max-w-sm w-full">
+          <div className="flex flex-col items-center mb-6">
+            <img
+              src="/본향한의원세로형JPG.jpg"
+              alt="본향한의원"
+              className="h-20 w-auto mb-4"
+            />
+            <h1 className="text-xl font-bold text-stone-800">특화환자 관리</h1>
+            <p className="text-sm text-stone-500 mt-1">비밀번호를 입력하세요</p>
+          </div>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value)
+                  setPasswordError(false)
+                }}
+                placeholder="비밀번호"
+                className={`w-full px-4 py-3 border rounded-lg text-center text-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent ${
+                  passwordError ? 'border-red-500 bg-red-50' : 'border-stone-300'
+                }`}
+                autoFocus
+              />
+              {passwordError && (
+                <p className="text-red-500 text-sm text-center mt-2">비밀번호가 틀렸습니다</p>
+              )}
+            </div>
+            <button
+              type="submit"
+              className="w-full py-3 bg-stone-700 text-white rounded-lg hover:bg-stone-800 transition font-medium"
+            >
+              로그인
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-stone-100">
