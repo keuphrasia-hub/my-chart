@@ -44,22 +44,25 @@ export const loadAllPatients = async (userId) => {
     const patients = (data || []).map(row => ({
       id: row.id,
       name: row.name,
-      gender: row.gender,
-      age: row.age,
-      firstVisitDate: row.first_visit_date,
+      doctor: row.doctor,
+      contact: row.contact,
       symptoms: row.symptoms,
-      treatmentMonths: row.treatment_months,
-      visitInterval: row.visit_interval,
-      doctorMemo: row.doctor_memo,
-      weeklyVisits: row.weekly_visits || [],
-      herbalRecords: row.herbal_records || [],
-      consultations: row.consultations || [],
-      isCompleted: row.is_completed,
-      completedDate: row.completed_date,
-      hasWrittenReview: row.has_written_review,
-      hasVideoInterview: row.has_video_interview,
+      firstVisitDate: row.first_visit_date,
+      treatmentStartDate: row.treatment_start_date,
+      treatmentPeriod: row.treatment_period,
+      status: row.status || 'active',
+      herbal: row.herbal || [
+        { month: 1, date: '', seoljin: false, omnifit: false },
+        { month: 2, date: '', seoljin: false, omnifit: false },
+        { month: 3, date: '', seoljin: false, omnifit: false },
+        { month: 4, date: '', seoljin: false, omnifit: false },
+        { month: 5, date: '', seoljin: false, omnifit: false },
+        { month: 6, date: '', seoljin: false, omnifit: false },
+      ],
+      weeklyVisits: row.weekly_visits || Array(24).fill(false),
+      review: row.review || '',
+      missedReasons: row.missed_reasons || {},
       createdAt: row.created_at,
-      updatedAt: row.updated_at,
     }))
 
     console.log('[Supabase] 로드 성공:', patients.length, '명')
@@ -81,20 +84,17 @@ export const insertPatient = async (userId, patient) => {
         id: patient.id,
         user_id: userId,
         name: patient.name,
-        gender: patient.gender,
-        age: patient.age,
-        first_visit_date: patient.firstVisitDate,
+        doctor: patient.doctor,
+        contact: patient.contact,
         symptoms: patient.symptoms,
-        treatment_months: patient.treatmentMonths,
-        visit_interval: patient.visitInterval,
-        doctor_memo: patient.doctorMemo,
-        weekly_visits: patient.weeklyVisits || [],
-        herbal_records: patient.herbalRecords || [],
-        consultations: patient.consultations || [],
-        is_completed: patient.isCompleted || false,
-        completed_date: patient.completedDate,
-        has_written_review: patient.hasWrittenReview || false,
-        has_video_interview: patient.hasVideoInterview || false,
+        first_visit_date: patient.firstVisitDate,
+        treatment_start_date: patient.treatmentStartDate,
+        treatment_period: patient.treatmentPeriod,
+        status: patient.status || 'active',
+        herbal: patient.herbal,
+        weekly_visits: patient.weeklyVisits,
+        review: patient.review || '',
+        missed_reasons: patient.missedReasons || {},
         created_at: patient.createdAt,
       })
 
@@ -119,20 +119,17 @@ export const updatePatient = async (patientId, updates) => {
     // JS 카멜케이스를 DB 스네이크케이스로 변환
     const dbUpdates = {}
     if (updates.name !== undefined) dbUpdates.name = updates.name
-    if (updates.gender !== undefined) dbUpdates.gender = updates.gender
-    if (updates.age !== undefined) dbUpdates.age = updates.age
-    if (updates.firstVisitDate !== undefined) dbUpdates.first_visit_date = updates.firstVisitDate
+    if (updates.doctor !== undefined) dbUpdates.doctor = updates.doctor
+    if (updates.contact !== undefined) dbUpdates.contact = updates.contact
     if (updates.symptoms !== undefined) dbUpdates.symptoms = updates.symptoms
-    if (updates.treatmentMonths !== undefined) dbUpdates.treatment_months = updates.treatmentMonths
-    if (updates.visitInterval !== undefined) dbUpdates.visit_interval = updates.visitInterval
-    if (updates.doctorMemo !== undefined) dbUpdates.doctor_memo = updates.doctorMemo
+    if (updates.firstVisitDate !== undefined) dbUpdates.first_visit_date = updates.firstVisitDate
+    if (updates.treatmentStartDate !== undefined) dbUpdates.treatment_start_date = updates.treatmentStartDate
+    if (updates.treatmentPeriod !== undefined) dbUpdates.treatment_period = updates.treatmentPeriod
+    if (updates.status !== undefined) dbUpdates.status = updates.status
+    if (updates.herbal !== undefined) dbUpdates.herbal = updates.herbal
     if (updates.weeklyVisits !== undefined) dbUpdates.weekly_visits = updates.weeklyVisits
-    if (updates.herbalRecords !== undefined) dbUpdates.herbal_records = updates.herbalRecords
-    if (updates.consultations !== undefined) dbUpdates.consultations = updates.consultations
-    if (updates.isCompleted !== undefined) dbUpdates.is_completed = updates.isCompleted
-    if (updates.completedDate !== undefined) dbUpdates.completed_date = updates.completedDate
-    if (updates.hasWrittenReview !== undefined) dbUpdates.has_written_review = updates.hasWrittenReview
-    if (updates.hasVideoInterview !== undefined) dbUpdates.has_video_interview = updates.hasVideoInterview
+    if (updates.review !== undefined) dbUpdates.review = updates.review
+    if (updates.missedReasons !== undefined) dbUpdates.missed_reasons = updates.missedReasons
 
     dbUpdates.updated_at = new Date().toISOString()
 
@@ -183,22 +180,18 @@ export const deletePatientFromDB = async (patientId) => {
 const rowToPatient = (row) => ({
   id: row.id,
   name: row.name,
-  gender: row.gender,
-  age: row.age,
-  firstVisitDate: row.first_visit_date,
+  doctor: row.doctor,
+  contact: row.contact,
   symptoms: row.symptoms,
-  treatmentMonths: row.treatment_months,
-  visitInterval: row.visit_interval,
-  doctorMemo: row.doctor_memo,
+  firstVisitDate: row.first_visit_date,
+  treatmentStartDate: row.treatment_start_date,
+  treatmentPeriod: row.treatment_period,
+  status: row.status || 'active',
+  herbal: row.herbal || [],
   weeklyVisits: row.weekly_visits || [],
-  herbalRecords: row.herbal_records || [],
-  consultations: row.consultations || [],
-  isCompleted: row.is_completed,
-  completedDate: row.completed_date,
-  hasWrittenReview: row.has_written_review,
-  hasVideoInterview: row.has_video_interview,
+  review: row.review || '',
+  missedReasons: row.missed_reasons || {},
   createdAt: row.created_at,
-  updatedAt: row.updated_at,
 })
 
 // Realtime 구독 설정
