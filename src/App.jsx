@@ -1,8 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { getUserId, loadAllPatients, insertPatient, updatePatient as updatePatientInDB, deletePatientFromDB, subscribeToPatients, unsubscribe } from './supabase'
 
-// localStorage 키 (v9: 데이터 초기화)
-const STORAGE_KEY = 'bonhyang_patients_v9'
+// localStorage 키 (v10: 데이터 완전 초기화)
+const STORAGE_KEY = 'bonhyang_patients_v10'
+
+// 이전 버전 데이터 모두 삭제
+const clearOldData = () => {
+  const keysToRemove = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (key && key.startsWith('bonhyang_patients_v') && key !== STORAGE_KEY) {
+      keysToRemove.push(key)
+    }
+  }
+  keysToRemove.forEach(key => localStorage.removeItem(key))
+  // 현재 키도 비우기 (완전 초기화)
+  localStorage.removeItem(STORAGE_KEY)
+}
+
+// 앱 시작 시 이전 데이터 삭제
+clearOldData()
 
 // 초기 데이터 로드
 const loadPatients = () => {
