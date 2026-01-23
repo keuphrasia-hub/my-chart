@@ -3,3 +3,57 @@
 body {
   font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', sans-serif;
 }
+
+/* Select 드롭다운 텍스트 중앙정렬 */
+select.text-center {
+  text-align: center;
+  text-align-last: center;
+  -moz-text-align-last: center;
+}
+
+/* 탕약관리 날짜 입력 - 값이 없을 때 텍스트 숨기기 */
+input.herbal-date:not(:focus):invalid,
+input.herbal-date[value=""]:not(:focus) {
+  color: transparent;
+}
+
+input.herbal-date::-webkit-datetime-edit {
+  color: inherit;
+}
+
+input.herbal-date[value=""]::-webkit-datetime-edit {
+  color: transparent;
+}
+
+/* 날짜 없을 때: 달력 아이콘만 표시 */
+input.herbal-date[value=""]::-webkit-calendar-picker-indicator {
+  opacity: 0.5;
+}
+
+/* 날짜 있을 때: 달력 아이콘 숨기기, 날짜만 표시 */
+input.herbal-date:not([value=""])::-webkit-calendar-picker-indicator {
+  display: none;
+}
+
+input.herbal-date:not([value=""])::-webkit-datetime-edit-year-field {
+  display: none;
+}
+
+input.herbal-date:not([value=""])::-webkit-datetime-edit-text:first-of-type {
+  display: none;
+}
+
+/* 월/일 앞의 0 제거 */
+input.herbal-date:not([value=""])::-webkit-datetime-edit-month-field,
+input.herbal-date:not([value=""])::-webkit-datetime-edit-day-field {
+  padding: 0;
+}
+
+input.herbal-date:not([value=""]) {
+  width: 38px !important;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: #57534e;
+  letter-spacing: -0.5px;
+}

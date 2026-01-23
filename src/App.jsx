@@ -1,16 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
-import { getUserId, setUserId as setStoredUserId, loadFromCloud, saveToCloud, subscribeToChanges, unsubscribe } from './supabase'
+import React, { useState, useEffect, useRef } from 'react'
+import { getUserId, loadAllPatients, insertPatient, updatePatient as updatePatientInDB, deletePatientFromDB, subscribeToPatients, unsubscribe } from './supabase'
 
 // localStorage 키
-const STORAGE_KEY = 'hanuiwon_patients_v4'
-
-// 섹션 컴포넌트 (App 외부에 정의하여 리렌더링 시 재생성 방지)
-const Section = ({ title, children, className = '' }) => (
-  <div className={`bg-white p-6 rounded-xl shadow-sm border border-gray-100 ${className}`}>
-    <h3 className="font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-100">{title}</h3>
-    {children}
-  </div>
-)
+const STORAGE_KEY = 'bonhyang_patients_v8'
 
 // 초기 데이터 로드
 const loadPatients = () => {
@@ -24,66 +16,227 @@ const savePatients = (patients) => {
 }
 
 // 오늘 날짜 (YYYY-MM-DD)
-const getTodayDate = () => {
-  return new Date().toISOString().split('T')[0]
+const getTodayDate = () => new Date().toISOString().split('T')[0]
+
+// 날짜 포맷 (M/D) - 앞에 0 없이
+const formatDateShort = (dateStr) => {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  if (isNaN(d)) return dateStr
+  return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
+// 연도-주차 계산 (ISO week)
+const getYearWeek = (date) => {
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7))
+  const yearStart = new Date(d.getFullYear(), 0, 1)
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7)
+  const year = d.getFullYear()
+  return { year, week: weekNo, code: `${String(year).slice(2)}${String(weekNo).padStart(2, '0')}` }
+}
+
+// 오늘의 연도-주차
+const getTodayYearWeek = () => getYearWeek(new Date())
+
+// 치료 시작일 기준 N주차의 연도-주차 계산
+const getWeekYearCode = (treatmentStartDate, weekIndex) => {
+  if (!treatmentStartDate) return ''
+  const startDate = new Date(treatmentStartDate)
+  const targetDate = new Date(startDate)
+  targetDate.setDate(startDate.getDate() + (weekIndex * 7))
+  return getYearWeek(targetDate).code
+}
+
+// 오늘의 연도-주차 코드
+const getTodayWeekCode = () => getYearWeek(new Date()).code
+
+// 치료 시작일 기준 현재 몇 주차인지 계산 (오늘 날짜의 주차 코드와 비교)
+const getCurrentWeekIndex = (treatmentStartDate) => {
+  if (!treatmentStartDate) return -1
+  const todayCode = getTodayWeekCode()
+
+  // 각 주차의 코드를 계산해서 오늘 코드와 일치하는 주차 찾기
+  for (let i = 0; i < 24; i++) {
+    const weekCode = getWeekYearCode(treatmentStartDate, i)
+    if (weekCode === todayCode) {
+      return i
+    }
+  }
+  return -1
+}
+
+// 치료기간 옵션
+const TREATMENT_PERIOD_OPTIONS = [
+  '1개월 / 주1회',
+  '1개월 / 주2회',
+  '1개월 / 주3회',
+  '2개월 / 주1회',
+  '2개월 / 주2회',
+  '3개월 / 주1회',
+  '3개월 / 주2회',
+  '3개월 / 주3회',
+  '6개월 / 주1회',
+  '6개월 / 주2회',
+]
+
+// 탭 종류
+const TABS = [
+  { key: 'active', label: '진행중' },
+  { key: 'completed', label: '치료졸업' },
+  { key: 'dropout', label: '이탈' },
+]
+
+// 후기 옵션
+const REVIEW_OPTIONS = [
+  { value: '', label: '선택' },
+  { value: 'written', label: '수기후기만' },
+  { value: 'video_public', label: '공개영상+수기' },
+  { value: 'video_private', label: '비공개영상+수기' },
+]
+
+// 치료기간에서 개월 수 추출
+const getTreatmentMonths = (treatmentPeriod) => {
+  if (!treatmentPeriod) return 6 // 기본값 6개월
+  const match = treatmentPeriod.match(/(\d+)개월/)
+  return match ? parseInt(match[1]) : 6
+}
+
+// 비밀번호 설정
+const CORRECT_PASSWORD = 'qhsgid!@!@'
+const AUTH_KEY = 'bonhyang_auth'
+
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return sessionStorage.getItem(AUTH_KEY) === 'true'
+  })
+  const [password, setPassword] = useState('')
+  const [passwordError, setPasswordError] = useState(false)
+
   const [patients, setPatients] = useState(loadPatients)
-  const [view, setView] = useState('list')
-  const [selectedPatient, setSelectedPatient] = useState(null)
-  const [listFilter, setListFilter] = useState('active')
-
-  // 클라우드 동기화 상태
-  const [syncStatus, setSyncStatus] = useState('idle') // idle, syncing, synced, error
   const [userId, setUserId] = useState('')
-  const [showSyncModal, setShowSyncModal] = useState(false)
-  const syncTimeoutRef = useRef(null)
+  const [syncStatus, setSyncStatus] = useState('idle')
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [filterDoctor, setFilterDoctor] = useState('전체')
+  const [activeTab, setActiveTab] = useState('active')
+  const [selectedPatient, setSelectedPatient] = useState(null) // 세부정보 모달용
+  const [missedReasonModal, setMissedReasonModal] = useState(null) // { patientId, weekIdx, reason }
+  const [isListCollapsed, setIsListCollapsed] = useState(false) // 목록 접기/펼치기
+  const [visibleRows, setVisibleRows] = useState(10) // 표시할 행 수
 
-  // 새 환자 등록 폼 상태
-  const [newPatient, setNewPatient] = useState({
-    name: '',
-    gender: '',
-    age: '',
-    firstVisitDate: getTodayDate(),
-    symptoms: '',
-    treatmentMonths: 3,
-    visitInterval: '주 2회',
-    doctorMemo: '',
-  })
-
-  // 상담 기록 입력 상태
-  const [newConsultation, setNewConsultation] = useState({
-    date: getTodayDate(),
-    comment: '',
-  })
-
-  // Realtime 채널 참조
   const channelRef = useRef(null)
-  // 내가 저장한 것인지 확인 (Realtime 무한루프 방지)
   const isSavingRef = useRef(false)
+  const debounceRef = useRef(null)
 
-  // 초기 로드: 사용자 ID 설정 및 클라우드 데이터 로드 + Realtime 구독
+  // 비밀번호 확인
+  const handleLogin = (e) => {
+    e.preventDefault()
+    if (password === CORRECT_PASSWORD) {
+      sessionStorage.setItem(AUTH_KEY, 'true')
+      setIsAuthenticated(true)
+      setPasswordError(false)
+    } else {
+      setPasswordError(true)
+      setPassword('')
+    }
+  }
+
+  // 로그인 화면
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-stone-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-lg p-8 max-w-sm w-full">
+          <div className="flex flex-col items-center mb-6">
+            <img
+              src="/본향한의원세로형JPG.jpg"
+              alt="본향한의원"
+              className="h-20 w-auto mb-4"
+            />
+            <h1 className="text-xl font-bold text-stone-800">특화환자 관리</h1>
+            <p className="text-sm text-stone-500 mt-1">비밀번호를 입력하세요</p>
+          </div>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value)
+                  setPasswordError(false)
+                }}
+                placeholder="비밀번호"
+                className={`w-full px-4 py-3 border rounded-lg text-center text-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent ${
+                  passwordError ? 'border-red-500 bg-red-50' : 'border-stone-300'
+                }`}
+                autoFocus
+              />
+              {passwordError && (
+                <p className="text-red-500 text-sm text-center mt-2">비밀번호가 틀렸습니다</p>
+              )}
+            </div>
+            <button
+              type="submit"
+              className="w-full py-3 bg-stone-700 text-white rounded-lg hover:bg-stone-800 transition font-medium"
+            >
+              로그인
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
+
+  // 새 환자 폼
+  const [newPatient, setNewPatient] = useState({
+    doctor: '',
+    firstVisitDate: getTodayDate(),
+    treatmentStartDate: getTodayDate(),
+    name: '',
+    contact: '',
+    symptoms: '',
+    treatmentPeriod: '3개월 / 주2회',
+  })
+
+  // 초기 로드
   useEffect(() => {
     const initCloud = async () => {
       const id = getUserId()
       setUserId(id)
-
-      // 클라우드에서 데이터 불러오기 시도
       setSyncStatus('syncing')
-      const cloudData = await loadFromCloud(id)
 
+      // 로컬 데이터가 없으면 샘플 데이터 로드
+      const localData = loadPatients()
+      if (localData.length === 0) {
+        try {
+          const res = await fetch('/sample_patients.json')
+          if (res.ok) {
+            const sampleData = await res.json()
+            if (sampleData && sampleData.length > 0) {
+              // 이탈 여부 체크 (결과평가에 '이탈' 포함된 경우)
+              const processedData = sampleData.map(p => ({
+                ...p,
+                status: p.resultEval?.includes('이탈') ? 'dropout' : 'active'
+              }))
+              setPatients(processedData)
+              savePatients(processedData)
+              console.log('[App] 샘플 데이터 로드:', processedData.length, '명')
+            }
+          }
+        } catch (e) {
+          console.log('[App] 샘플 데이터 없음')
+        }
+      }
+
+      const cloudData = await loadAllPatients(id)
       if (cloudData && cloudData.length > 0) {
-        // 클라우드 데이터가 있으면 로컬과 병합 (클라우드 우선)
-        const localData = loadPatients()
-        if (localData.length === 0) {
+        const currentLocal = loadPatients()
+        if (currentLocal.length === 0) {
           setPatients(cloudData)
           savePatients(cloudData)
-        } else {
-          // 로컬에도 데이터가 있으면 사용자에게 선택권 제공
+        } else if (cloudData.length !== currentLocal.length) {
           const useCloud = confirm(
-            `클라우드에 ${cloudData.length}명, 로컬에 ${localData.length}명의 데이터가 있습니다.\n` +
-            `확인: 클라우드 데이터 사용\n취소: 로컬 데이터 유지`
+            `클라우드에 ${cloudData.length}명, 로컬에 ${currentLocal.length}명의 데이터가 있습니다.\n확인: 클라우드 데이터 사용\n취소: 로컬 데이터 유지`
           )
           if (useCloud) {
             setPatients(cloudData)
@@ -93,1203 +246,1027 @@ function App() {
       }
       setSyncStatus('synced')
 
-      // Realtime 구독 설정
-      channelRef.current = subscribeToChanges(id, (newData) => {
-        // 다른 기기에서 변경된 데이터 수신
-        if (!isSavingRef.current && Array.isArray(newData)) {
-          console.log('[App] Realtime 데이터 수신:', newData.length, '명')
-          setPatients(newData)
-          savePatients(newData)
+      // Realtime 구독
+      channelRef.current = subscribeToPatients(id, {
+        onInsert: (newPatient) => {
+          if (!isSavingRef.current) {
+            setPatients(prev => {
+              if (prev.find(p => p.id === newPatient.id)) return prev
+              const updated = [newPatient, ...prev]
+              savePatients(updated)
+              return updated
+            })
+          }
+        },
+        onUpdate: (updatedPatient) => {
+          if (!isSavingRef.current) {
+            setPatients(prev => {
+              const updated = prev.map(p => p.id === updatedPatient.id ? updatedPatient : p)
+              savePatients(updated)
+              return updated
+            })
+          }
+        },
+        onDelete: (deletedId) => {
+          if (!isSavingRef.current) {
+            setPatients(prev => {
+              const updated = prev.filter(p => p.id !== deletedId)
+              savePatients(updated)
+              return updated
+            })
+          }
         }
       })
     }
-
     initCloud()
-
-    // 컴포넌트 언마운트 시 구독 해제
     return () => {
-      if (channelRef.current) {
-        unsubscribe(channelRef.current)
-      }
+      if (channelRef.current) unsubscribe(channelRef.current)
     }
   }, [])
 
-  // 환자 데이터 변경 시 localStorage + 클라우드에 저장 (디바운스)
+  // 로컬 저장
   useEffect(() => {
     savePatients(patients)
+  }, [patients])
 
-    // 클라우드 동기화 (1초 디바운스)
-    if (syncTimeoutRef.current) {
-      clearTimeout(syncTimeoutRef.current)
-    }
-
-    if (userId && patients.length >= 0) {
-      syncTimeoutRef.current = setTimeout(async () => {
-        setSyncStatus('syncing')
-        isSavingRef.current = true // Realtime 무한루프 방지
-        const success = await saveToCloud(userId, patients)
-        isSavingRef.current = false
-        setSyncStatus(success ? 'synced' : 'error')
-      }, 1000)
-    }
-
-    return () => {
-      if (syncTimeoutRef.current) {
-        clearTimeout(syncTimeoutRef.current)
-      }
-    }
-  }, [patients, userId])
-
-  // 새 환자 등록
-  const handleAddPatient = () => {
+  // 환자 추가
+  const handleAddPatient = async () => {
     if (!newPatient.name.trim()) {
-      alert('환자 이름을 입력해주세요.')
+      alert('환자명을 입력해주세요.')
       return
     }
 
     const patient = {
       id: Date.now(),
       ...newPatient,
-      age: newPatient.age ? Number(newPatient.age) : null,
+      status: 'active', // 진행중
+      herbal: [
+        { month: 1, date: '', seoljin: false, omnifit: false },
+        { month: 2, date: '', seoljin: false, omnifit: false },
+        { month: 3, date: '', seoljin: false, omnifit: false },
+        { month: 4, date: '', seoljin: false, omnifit: false },
+        { month: 5, date: '', seoljin: false, omnifit: false },
+        { month: 6, date: '', seoljin: false, omnifit: false },
+      ],
+      weeklyVisits: Array(24).fill(false),
+      review: '',
       createdAt: new Date().toISOString(),
-      // 주간 내원 기록
-      weeklyVisits: [],
-      // 탕/환약 복용 기록 (월별): { month: 1, taken: true, type: '탕약', note: '' }
-      herbalRecords: [],
-      // 상담 기록: { id, date, comment }
-      consultations: [],
-      // 치료 종료 관련
-      isCompleted: false,
-      completedDate: null,
-      hasWrittenReview: false,
-      hasVideoInterview: false,
     }
 
-    setPatients([...patients, patient])
+    setPatients(prev => [patient, ...prev])
+
+    if (userId) {
+      setSyncStatus('syncing')
+      isSavingRef.current = true
+      await insertPatient(userId, patient)
+      isSavingRef.current = false
+      setSyncStatus('synced')
+    }
+
     setNewPatient({
-      name: '',
-      gender: '',
-      age: '',
+      doctor: '',
       firstVisitDate: getTodayDate(),
+      treatmentStartDate: getTodayDate(),
+      name: '',
+      contact: '',
       symptoms: '',
-      treatmentMonths: 3,
-      visitInterval: '주 2회',
-      doctorMemo: '',
+      treatmentPeriod: '3개월 / 주2회',
     })
-    setView('list')
+    setShowAddModal(false)
   }
 
-  // 환자 정보 업데이트
-  const updatePatient = (patientId, updates) => {
-    setPatients(patients.map(p =>
-      p.id === patientId ? { ...p, ...updates } : p
+  // 환자 업데이트 (디바운스)
+  const updatePatientField = (patientId, field, value) => {
+    setPatients(prev => prev.map(p =>
+      p.id === patientId ? { ...p, [field]: value } : p
     ))
-  }
 
-  // 주간 내원 토글
-  const toggleWeeklyVisit = (patientId, week) => {
-    setPatients(patients.map(p => {
-      if (p.id === patientId) {
-        const existingVisit = p.weeklyVisits.find(v => v.week === week)
-        if (existingVisit) {
-          return {
-            ...p,
-            weeklyVisits: p.weeklyVisits.map(v =>
-              v.week === week
-                ? { ...v, visited: !v.visited, missedReason: v.visited ? v.missedReason : '' }
-                : v
-            )
-          }
-        } else {
-          return {
-            ...p,
-            weeklyVisits: [...p.weeklyVisits, {
-              week,
-              visited: true,
-              missedReason: '',
-              date: new Date().toISOString()
-            }]
-          }
-        }
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(async () => {
+      if (userId) {
+        isSavingRef.current = true
+        await updatePatientInDB(patientId, { [field]: value })
+        isSavingRef.current = false
       }
-      return p
-    }))
+    }, 1000)
   }
 
-  // 내원 미이행 사유 업데이트
-  const updateMissedReason = (patientId, week, reason) => {
-    setPatients(patients.map(p => {
-      if (p.id === patientId) {
-        return {
-          ...p,
-          weeklyVisits: p.weeklyVisits.map(v =>
-            v.week === week ? { ...v, missedReason: reason } : v
-          )
-        }
-      }
-      return p
-    }))
-  }
+  // 탕약 체크 토글
+  const toggleHerbal = (patientId, monthIndex, field) => {
+    const patient = patients.find(p => p.id === patientId)
+    if (!patient) return
 
-  // 탕/환약 기록 업데이트
-  const updateHerbalRecord = (patientId, month, field, value) => {
-    setPatients(patients.map(p => {
-      if (p.id === patientId) {
-        const records = p.herbalRecords || []
-        const existingRecord = records.find(r => r.month === month)
-        if (existingRecord) {
-          return {
-            ...p,
-            herbalRecords: records.map(r =>
-              r.month === month ? { ...r, [field]: value } : r
-            )
-          }
-        } else {
-          return {
-            ...p,
-            herbalRecords: [...records, { month, taken: false, type: '', note: '', [field]: value }]
-          }
-        }
-      }
-      return p
-    }))
-  }
+    const defaultHerbal = [
+      { month: 1, date: '', seoljin: false, omnifit: false },
+      { month: 2, date: '', seoljin: false, omnifit: false },
+      { month: 3, date: '', seoljin: false, omnifit: false },
+      { month: 4, date: '', seoljin: false, omnifit: false },
+      { month: 5, date: '', seoljin: false, omnifit: false },
+      { month: 6, date: '', seoljin: false, omnifit: false },
+    ]
+    const newHerbal = [...(patient.herbal?.length === 6 ? patient.herbal : defaultHerbal)]
 
-  // 탕/환약 복용 토글
-  const toggleHerbalTaken = (patientId, month) => {
-    setPatients(patients.map(p => {
-      if (p.id === patientId) {
-        const records = p.herbalRecords || []
-        const existingRecord = records.find(r => r.month === month)
-        if (existingRecord) {
-          return {
-            ...p,
-            herbalRecords: records.map(r =>
-              r.month === month ? { ...r, taken: !r.taken } : r
-            )
-          }
-        } else {
-          return {
-            ...p,
-            herbalRecords: [...records, { month, taken: true, type: '탕약', note: '' }]
-          }
-        }
-      }
-      return p
-    }))
-  }
-
-  // 상담 기록 추가
-  const addConsultation = (patientId) => {
-    if (!newConsultation.comment.trim()) {
-      alert('상담 내용을 입력해주세요.')
-      return
+    if (field === 'date') {
+      newHerbal[monthIndex] = { ...newHerbal[monthIndex], date: getTodayDate() }
+    } else {
+      newHerbal[monthIndex] = { ...newHerbal[monthIndex], [field]: !newHerbal[monthIndex][field] }
     }
 
-    setPatients(patients.map(p => {
-      if (p.id === patientId) {
-        const consultations = p.consultations || []
-        return {
-          ...p,
-          consultations: [
-            {
-              id: Date.now(),
-              date: newConsultation.date,
-              comment: newConsultation.comment,
-            },
-            ...consultations,
-          ]
-        }
-      }
-      return p
-    }))
-
-    setNewConsultation({
-      date: getTodayDate(),
-      comment: '',
-    })
+    updatePatientField(patientId, 'herbal', newHerbal)
   }
 
-  // 상담 기록 삭제
-  const deleteConsultation = (patientId, consultationId) => {
-    if (confirm('이 상담 기록을 삭제하시겠습니까?')) {
-      setPatients(patients.map(p => {
-        if (p.id === patientId) {
-          return {
-            ...p,
-            consultations: (p.consultations || []).filter(c => c.id !== consultationId)
-          }
-        }
-        return p
-      }))
-    }
-  }
+  // 주차 내원 토글
+  const toggleWeeklyVisit = (patientId, weekIndex) => {
+    const patient = patients.find(p => p.id === patientId)
+    if (!patient) return
 
-  // 치료 종료 토글
-  const toggleTreatmentComplete = (patientId) => {
-    setPatients(patients.map(p => {
-      if (p.id === patientId) {
-        const newCompleted = !p.isCompleted
-        return {
-          ...p,
-          isCompleted: newCompleted,
-          completedDate: newCompleted ? new Date().toISOString() : null,
-          hasWrittenReview: newCompleted ? p.hasWrittenReview : false,
-          hasVideoInterview: newCompleted ? p.hasVideoInterview : false,
-        }
-      }
-      return p
-    }))
+    const newWeekly = [...(patient.weeklyVisits || Array(24).fill(false))]
+    newWeekly[weekIndex] = !newWeekly[weekIndex]
+    updatePatientField(patientId, 'weeklyVisits', newWeekly)
   }
 
   // 환자 삭제
-  const deletePatient = (patientId) => {
-    if (confirm('정말 이 환자를 삭제하시겠습니까?')) {
-      setPatients(patients.filter(p => p.id !== patientId))
-      setView('list')
-      setSelectedPatient(null)
+  const deletePatient = async (patientId) => {
+    if (!confirm('정말 삭제하시겠습니까?')) return
+
+    setPatients(prev => prev.filter(p => p.id !== patientId))
+    if (userId) {
+      isSavingRef.current = true
+      await deletePatientFromDB(patientId)
+      isSavingRef.current = false
     }
   }
 
-  // 통계 계산
-  const calculateStats = (patient) => {
-    const totalMonths = patient.treatmentMonths
-    const totalWeeks = totalMonths * 4
-    const visitedWeeks = patient.weeklyVisits.filter(v => v.visited).length
-    const herbalRecords = patient.herbalRecords || []
-    const herbalMonths = herbalRecords.filter(r => r.taken).length
-    const adherenceRate = totalWeeks > 0 ? Math.round((visitedWeeks / totalWeeks) * 100) : 0
+  // 담당의 목록
+  const doctors = ['전체', ...new Set(patients.map(p => p.doctor).filter(Boolean))]
 
-    return {
-      totalMonths,
-      totalWeeks,
-      visitedWeeks,
-      herbalMonths,
-      adherenceRate,
+  // 필터링된 환자 (탭 + 담당의)
+  const filteredPatients = patients
+    .filter(p => {
+      const status = p.status || 'active'
+      return status === activeTab
+    })
+    .filter(p => filterDoctor === '전체' || p.doctor === filterDoctor)
+    .sort((a, b) => {
+      // 최신 데이터가 위로 (치료시작일 기준)
+      const dateA = new Date(a.treatmentStartDate || a.firstVisitDate || a.createdAt)
+      const dateB = new Date(b.treatmentStartDate || b.firstVisitDate || b.createdAt)
+      return dateB - dateA
+    })
+
+  // 탭별 환자 수
+  const tabCounts = {
+    active: patients.filter(p => (p.status || 'active') === 'active').length,
+    completed: patients.filter(p => p.status === 'completed').length,
+    dropout: patients.filter(p => p.status === 'dropout').length,
+  }
+
+  // 동기화 상태
+  const getSyncStatus = () => {
+    switch (syncStatus) {
+      case 'syncing': return { icon: '↻', text: '동기화 중', color: 'text-stone-500' }
+      case 'synced': return { icon: '✓', text: '동기화됨', color: 'text-stone-600' }
+      case 'error': return { icon: '!', text: '오류', color: 'text-red-600' }
+      default: return { icon: '○', text: '대기', color: 'text-stone-400' }
     }
   }
+  const sync = getSyncStatus()
 
-  // 필터링된 환자 목록
-  const getFilteredPatients = () => {
-    switch (listFilter) {
-      case 'active':
-        return patients.filter(p => !p.isCompleted)
-      case 'completed':
-        return patients.filter(p => p.isCompleted)
-      default:
-        return patients
-    }
-  }
-
-  // 수동 저장
-  const handleManualSave = () => {
-    savePatients(patients)
-    alert('데이터가 저장되었습니다.')
-  }
-
-  // JSON 내보내기
-  const handleExportJSON = () => {
-    const dataStr = JSON.stringify(patients, null, 2)
-    const blob = new Blob([dataStr], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `한의원_환자데이터_${new Date().toISOString().split('T')[0]}.json`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-  }
-
-  // JSON 가져오기
-  const handleImportJSON = (event) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        const importedData = JSON.parse(e.target?.result)
-        if (Array.isArray(importedData)) {
-          if (confirm(`${importedData.length}명의 환자 데이터를 가져오시겠습니까?\n기존 데이터는 유지됩니다.`)) {
-            // 중복 방지를 위해 ID 새로 생성
-            const newPatients = importedData.map(p => ({
-              ...p,
-              id: Date.now() + Math.random()
-            }))
-            setPatients([...patients, ...newPatients])
-            alert('데이터를 가져왔습니다.')
-          }
-        } else {
-          alert('올바른 형식의 JSON 파일이 아닙니다.')
-        }
-      } catch (error) {
-        alert('JSON 파일을 읽는 중 오류가 발생했습니다.')
-      }
-    }
-    reader.readAsText(file)
-    event.target.value = '' // 같은 파일 다시 선택 가능하도록
-  }
-
-  // 환자 목록 화면
-  const renderPatientList = () => {
-    const filteredPatients = getFilteredPatients()
-
-    return (
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <h2 className="text-xl font-semibold text-gray-800">환자 목록</h2>
-          <div className="flex flex-wrap gap-2">
-            <div className="flex rounded-lg overflow-hidden border border-gray-200">
-              {[
-                { key: 'active', label: '치료중' },
-                { key: 'completed', label: '종료' },
-                { key: 'all', label: '전체' },
-              ].map(f => (
-                <button
-                  key={f.key}
-                  onClick={() => setListFilter(f.key)}
-                  className={`px-3 py-1.5 text-sm transition ${
-                    listFilter === f.key
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setView('stats')}
-              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition text-sm"
-            >
-              전체 통계
-            </button>
-            <button
-              onClick={() => setView('add')}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
-            >
-              + 새 환자 등록
-            </button>
-          </div>
-        </div>
-
-        {filteredPatients.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            <p>등록된 환자가 없습니다.</p>
-            <p className="text-sm mt-2">새 환자를 등록해주세요.</p>
-          </div>
-        ) : (
-          <div className="grid gap-4">
-            {filteredPatients.map(patient => {
-              const stats = calculateStats(patient)
-              return (
-                <div
-                  key={patient.id}
-                  onClick={() => {
-                    setSelectedPatient(patient)
-                    setView('detail')
-                  }}
-                  className={`bg-white p-5 rounded-xl shadow-sm border hover:shadow-md transition cursor-pointer ${
-                    patient.isCompleted ? 'border-gray-200 bg-gray-50' : 'border-gray-100'
-                  }`}
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-medium text-gray-900">{patient.name}</h3>
-                        {patient.gender && (
-                          <span className={`text-xs px-2 py-0.5 rounded ${
-                            patient.gender === '남' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'
-                          }`}>
-                            {patient.gender}
-                          </span>
-                        )}
-                        {patient.age && (
-                          <span className="text-xs text-gray-500">{patient.age}세</span>
-                        )}
-                        {patient.isCompleted && (
-                          <span className="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">치료종료</span>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-500 mt-1">
-                        치료기간: {patient.treatmentMonths}개월 ({stats.totalWeeks}주) | {patient.visitInterval}
-                      </p>
-                      <p className="text-sm text-gray-600 mt-2 line-clamp-1">{patient.symptoms}</p>
-                    </div>
-                    <div className="text-right ml-4">
-                      <div className="text-2xl font-bold text-blue-600">{stats.adherenceRate}%</div>
-                      <div className="text-xs text-gray-500">내원율</div>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-3 text-sm">
-                    <span className="text-gray-600">
-                      내원: <span className="font-medium text-gray-900">{stats.visitedWeeks}/{stats.totalWeeks}주</span>
-                    </span>
-                    <span className="text-emerald-600">
-                      탕/환약: <span className="font-medium">{stats.herbalMonths}/{stats.totalMonths}개월</span>
-                    </span>
-                    {patient.isCompleted && patient.hasWrittenReview && (
-                      <span className="text-amber-600">수기후기 완료</span>
-                    )}
-                    {patient.isCompleted && patient.hasVideoInterview && (
-                      <span className="text-purple-600">영상인터뷰 완료</span>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // 새 환자 등록 화면
-  const renderAddPatient = () => (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <button
-          onClick={() => setView('list')}
-          className="text-gray-600 hover:text-gray-900"
-        >
-          ← 목록으로
-        </button>
-        <h2 className="text-xl font-semibold text-gray-800">새 환자 등록</h2>
-      </div>
-
-      {/* 기본 정보 섹션 */}
-      <Section title="기본 정보">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              환자 이름 <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={newPatient.name}
-              onChange={(e) => setNewPatient({ ...newPatient, name: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-              placeholder="홍길동"
+  return (
+    <div className="min-h-screen bg-stone-100">
+      {/* 헤더 */}
+      <header className="bg-white shadow-sm border-b border-stone-200 sticky top-0 z-20">
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img
+              src="/본향한의원세로형JPG.jpg"
+              alt="본향한의원"
+              className="h-10 w-auto"
             />
+            <h1 className="text-xl font-bold text-stone-800">본향한의원 특화환자 관리</h1>
+            <span className={`flex items-center gap-1 text-xs ${sync.color}`}>
+              <span className={syncStatus === 'syncing' ? 'animate-spin' : ''}>{sync.icon}</span>
+              {sync.text}
+            </span>
           </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">성별</label>
-              <div className="flex gap-2">
-                {['남', '여'].map(g => (
-                  <button
-                    key={g}
-                    type="button"
-                    onClick={() => setNewPatient({ ...newPatient, gender: newPatient.gender === g ? '' : g })}
-                    className={`flex-1 py-3 rounded-lg border transition ${
-                      newPatient.gender === g
-                        ? g === '남' ? 'bg-blue-600 text-white border-blue-600' : 'bg-pink-500 text-white border-pink-500'
-                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {g}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">나이</label>
-              <input
-                type="number"
-                value={newPatient.age}
-                onChange={(e) => setNewPatient({ ...newPatient, age: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                placeholder="35"
-                min="1"
-                max="150"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">초진일</label>
-            <input
-              type="date"
-              value={newPatient.firstVisitDate}
-              onChange={(e) => setNewPatient({ ...newPatient, firstVisitDate: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">내원 간격</label>
-            <input
-              type="text"
-              value={newPatient.visitInterval}
-              onChange={(e) => setNewPatient({ ...newPatient, visitInterval: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-              placeholder="예: 주 2회, 2주 1회"
-            />
-          </div>
-        </div>
-      </Section>
-
-      {/* 증상 및 치료 계획 섹션 */}
-      <Section title="증상 및 치료 계획">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">증상 및 주소증</label>
-            <textarea
-              value={newPatient.symptoms}
-              onChange={(e) => setNewPatient({ ...newPatient, symptoms: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition h-24 resize-none"
-              placeholder="환자의 주요 증상을 입력하세요..."
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              치료 계획 기간
-              <span className="text-gray-400 font-normal ml-2">
-                ({newPatient.treatmentMonths * 4}주)
-              </span>
-            </label>
+          <div className="flex items-center gap-3">
             <select
-              value={newPatient.treatmentMonths}
-              onChange={(e) => setNewPatient({ ...newPatient, treatmentMonths: Number(e.target.value) })}
-              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+              value={filterDoctor}
+              onChange={(e) => setFilterDoctor(e.target.value)}
+              className="px-3 py-1.5 border border-stone-300 rounded-lg text-sm"
             >
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => (
-                <option key={m} value={m}>{m}개월 ({m * 4}주)</option>
+              {doctors.map(d => (
+                <option key={d} value={d}>{d}</option>
               ))}
             </select>
-          </div>
-        </div>
-      </Section>
-
-      {/* 원장 메모 섹션 */}
-      <Section title="원장 메모">
-        <textarea
-          value={newPatient.doctorMemo}
-          onChange={(e) => setNewPatient({ ...newPatient, doctorMemo: e.target.value })}
-          className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition h-32 resize-none"
-          placeholder="원장만 볼 수 있는 메모를 입력하세요..."
-        />
-      </Section>
-
-      <button
-        onClick={handleAddPatient}
-        className="w-full py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition font-medium text-lg"
-      >
-        환자 등록
-      </button>
-    </div>
-  )
-
-  // 환자 상세 화면
-  const renderPatientDetail = () => {
-    if (!selectedPatient) return null
-
-    const patient = patients.find(p => p.id === selectedPatient.id) || selectedPatient
-    const stats = calculateStats(patient)
-    const totalMonths = patient.treatmentMonths
-    const totalWeeks = totalMonths * 4
-    const herbalRecords = patient.herbalRecords || []
-    const consultations = patient.consultations || []
-
-    return (
-      <div className="space-y-6">
-        {/* 헤더 */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
             <button
-              onClick={() => {
-                setView('list')
-                setSelectedPatient(null)
-              }}
-              className="text-gray-600 hover:text-gray-900"
+              onClick={() => setShowAddModal(true)}
+              className="px-4 py-2 bg-stone-700 text-white rounded-lg hover:bg-stone-800 transition text-sm font-medium"
             >
-              ← 목록으로
+              + 환자 등록
             </button>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-semibold text-gray-800">{patient.name}</h2>
-              {patient.gender && (
-                <span className={`text-xs px-2 py-0.5 rounded ${
-                  patient.gender === '남' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'
-                }`}>
-                  {patient.gender}
-                </span>
-              )}
-              {patient.age && <span className="text-sm text-gray-500">{patient.age}세</span>}
-              {patient.isCompleted && (
-                <span className="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">치료종료</span>
-              )}
-            </div>
-          </div>
-          <button
-            onClick={() => deletePatient(patient.id)}
-            className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition text-sm"
-          >
-            삭제
-          </button>
-        </div>
-
-        {/* 통계 카드 */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 text-center">
-            <div className="text-3xl font-bold text-blue-600">{stats.adherenceRate}%</div>
-            <div className="text-sm text-gray-500 mt-1">내원율</div>
-          </div>
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 text-center">
-            <div className="text-3xl font-bold text-gray-900">{stats.visitedWeeks}<span className="text-lg text-gray-400">/{stats.totalWeeks}</span></div>
-            <div className="text-sm text-gray-500 mt-1">내원 주차</div>
-          </div>
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 text-center">
-            <div className="text-3xl font-bold text-emerald-600">{stats.herbalMonths}<span className="text-lg text-gray-400">/{stats.totalMonths}</span></div>
-            <div className="text-sm text-gray-500 mt-1">탕/환약 복용</div>
-          </div>
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 text-center">
-            <div className="text-3xl font-bold text-purple-600">{consultations.length}</div>
-            <div className="text-sm text-gray-500 mt-1">상담 기록</div>
           </div>
         </div>
+        {/* 탭 */}
+        <div className="px-4 pb-2 flex gap-1">
+          {TABS.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-4 py-2 rounded-t-lg text-sm font-medium transition ${
+                activeTab === tab.key
+                  ? 'bg-stone-700 text-white'
+                  : 'bg-stone-200 text-stone-600 hover:bg-stone-300'
+              }`}
+            >
+              {tab.label} ({tabCounts[tab.key]})
+            </button>
+          ))}
+        </div>
+      </header>
 
-        {/* 기본 정보 */}
-        <Section title="기본 정보">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <span className="text-gray-500">초진일</span>
-              <p className="font-medium mt-1">{patient.firstVisitDate || '-'}</p>
-            </div>
-            <div>
-              <span className="text-gray-500">치료 기간</span>
-              <p className="font-medium mt-1">{patient.treatmentMonths}개월 ({totalWeeks}주)</p>
-            </div>
-            <div>
-              <span className="text-gray-500">내원 간격</span>
-              <p className="font-medium mt-1">{patient.visitInterval || '-'}</p>
-            </div>
-            <div>
-              <span className="text-gray-500">등록일</span>
-              <p className="font-medium mt-1">{new Date(patient.createdAt).toLocaleDateString('ko-KR')}</p>
-            </div>
-          </div>
-          <div className="mt-4">
-            <span className="text-gray-500 text-sm">증상 및 주소증</span>
-            <p className="mt-1">{patient.symptoms || '-'}</p>
-          </div>
-        </Section>
+      {/* 메인 테이블 */}
+      <main className="p-4">
+        <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-stone-100 sticky top-0">
+                {/* 섹션 제목 행 */}
+                <tr className="bg-stone-200">
+                  {/* 상태 - 3행 병합, 고정열 */}
+                  <th rowSpan={3} className="sticky left-0 bg-stone-300 z-10 px-2 py-2 text-center font-bold text-stone-700 align-middle min-w-[60px] w-[60px] whitespace-nowrap">상태</th>
+                  {/* 환자명 - 3행 병합, 고정열 */}
+                  <th rowSpan={3} className="sticky left-[60px] bg-stone-300 z-10 px-2 py-2 text-center font-bold text-stone-700 align-middle min-w-[80px] whitespace-nowrap border-r border-stone-400">환자명</th>
+                  <th colSpan={5} className="bg-stone-300 border-r-2 border-stone-400 px-2 py-2 text-center font-bold text-stone-700">
+                    기본정보
+                  </th>
+                  <th colSpan={18} className="px-2 py-2 text-center font-bold text-amber-800 bg-amber-100 border-r-2 border-stone-400">
+                    탕약/환약관리
+                  </th>
+                  <th colSpan={24} className="px-2 py-2 text-center font-bold text-blue-800 bg-blue-100 border-r-2 border-stone-400">
+                    치료내원관리
+                  </th>
+                  <th rowSpan={3} className="px-2 py-2 text-center font-bold text-stone-700 bg-stone-300 border-r-2 border-stone-400 align-middle whitespace-nowrap">후기</th>
+                  <th rowSpan={3} className="px-2 py-2 text-center font-bold text-stone-700 bg-stone-300 align-middle whitespace-nowrap">삭제</th>
+                </tr>
+                {/* 컬럼 헤더 행 */}
+                <tr>
+                  <th rowSpan={2} className="px-2 py-2 text-center font-medium text-stone-700 whitespace-nowrap align-middle bg-stone-100">담당의</th>
+                  <th rowSpan={2} className="px-2 py-2 text-center font-medium text-stone-700 whitespace-nowrap align-middle bg-stone-100">초진일</th>
+                  <th rowSpan={2} className="px-2 py-2 text-center font-medium text-stone-700 whitespace-nowrap align-middle bg-stone-100">연락처</th>
+                  <th rowSpan={2} className="px-2 py-2 text-center font-medium text-stone-700 whitespace-nowrap min-w-[100px] align-middle bg-stone-100">증상</th>
+                  <th rowSpan={2} className="px-2 py-2 text-center font-medium text-stone-700 whitespace-nowrap border-r-2 border-stone-400 align-middle bg-stone-100">치료기간</th>
+                  {/* 탕약 복약 현황 - 6개월 */}
+                  {[1, 2, 3, 4, 5, 6].map(m => (
+                    <th key={`herb-${m}`} colSpan={3} className={`px-2 py-1 text-center font-medium text-stone-700 bg-amber-50 ${m < 6 ? 'border-r border-amber-200' : 'border-r-2 border-stone-400'}`}>
+                      {m}개월
+                    </th>
+                  ))}
+                  {/* 주차별 내원 - 6개월(24주) */}
+                  {[1, 2, 3, 4, 5, 6].map(month => (
+                    <th
+                      key={month}
+                      colSpan={4}
+                      className={`px-1 py-1 text-center font-medium text-stone-600 text-xs ${month % 2 === 0 ? 'bg-blue-50' : 'bg-blue-100/50'} ${month < 6 ? 'border-r border-blue-200' : 'border-r-2 border-stone-400'}`}
+                    >
+                      {month}개월
+                    </th>
+                  ))}
+                </tr>
+                {/* 서브헤더 행 */}
+                <tr className="bg-stone-50 text-xs">
+                  {/* 탕약 서브헤더 - 각 월별로 날짜/설진/옴니핏 (개별 셀) */}
+                  {[1, 2, 3, 4, 5, 6].map(m => (
+                    <React.Fragment key={`h-${m}-sub`}>
+                      <th className="px-1 py-1 text-center text-stone-500 bg-amber-50 min-w-[36px]">날짜</th>
+                      <th className="px-1 py-1 text-center text-stone-500 bg-amber-50 min-w-[32px]">설진</th>
+                      <th className={`px-1 py-1 text-center text-stone-500 bg-amber-50 min-w-[32px] ${m < 6 ? 'border-r border-amber-200' : 'border-r-2 border-stone-400'}`}>옴니</th>
+                    </React.Fragment>
+                  ))}
+                  {/* 주차 번호 */}
+                  {Array.from({ length: 24 }, (_, i) => {
+                    const monthGroup = Math.floor(i / 4) + 1
+                    return (
+                      <th
+                        key={i}
+                        className={`px-1 py-1 text-center text-stone-500 min-w-[38px] whitespace-nowrap ${monthGroup % 2 === 0 ? 'bg-blue-50' : 'bg-blue-100/50'} ${(i + 1) % 4 === 0 && i < 23 ? 'border-r border-blue-200' : ''} ${i === 23 ? 'border-r-2 border-stone-400' : ''}`}
+                      >
+                        {i + 1}주
+                      </th>
+                    )
+                  })}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {filteredPatients.length === 0 ? (
+                  <tr>
+                    <td colSpan={100} className="px-4 py-12 text-center text-stone-400">
+                      {activeTab === 'active' && '진행중인 환자가 없습니다.'}
+                      {activeTab === 'completed' && '치료졸업 환자가 없습니다.'}
+                      {activeTab === 'dropout' && '이탈 환자가 없습니다.'}
+                    </td>
+                  </tr>
+                ) : (
+                  (isListCollapsed ? filteredPatients.slice(0, visibleRows) : filteredPatients).map(patient => {
+                    const defaultHerbal = [
+                      { month: 1, date: '', seoljin: false, omnifit: false },
+                      { month: 2, date: '', seoljin: false, omnifit: false },
+                      { month: 3, date: '', seoljin: false, omnifit: false },
+                      { month: 4, date: '', seoljin: false, omnifit: false },
+                      { month: 5, date: '', seoljin: false, omnifit: false },
+                      { month: 6, date: '', seoljin: false, omnifit: false },
+                    ]
+                    const herbal = patient.herbal?.length === 6 ? patient.herbal : defaultHerbal
+                    const weekly = patient.weeklyVisits || Array(24).fill(false)
+                    const currentWeekIdx = getCurrentWeekIndex(patient.treatmentStartDate)
+                    const treatmentMonths = getTreatmentMonths(patient.treatmentPeriod)
+                    const treatmentWeeks = treatmentMonths * 4 // 1개월 = 4주
 
-        {/* 주간 내원 관리 */}
-        <Section title={`주간 내원 관리 (총 ${totalWeeks}주)`}>
-          <div className="space-y-2">
-            {Array.from({ length: totalMonths }, (_, monthIndex) => {
-              const monthNumber = monthIndex + 1
-              const startWeek = monthIndex * 4 + 1
-              const endWeek = startWeek + 3
+                    const handleRowClick = (e) => {
+                      // input, select, button, label 클릭 시에는 모달 열지 않음
+                      const tag = e.target.tagName.toUpperCase()
+                      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'BUTTON' || tag === 'LABEL') return
+                      // 부모 요소가 input/select/button인 경우도 체크
+                      if (e.target.closest('input, select, button, label')) return
+                      setSelectedPatient(patient)
+                    }
 
-              return (
-                <div key={monthNumber} className="border border-gray-100 rounded-lg overflow-hidden">
-                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-100">
-                    <span className="font-medium text-gray-700">{monthNumber}개월차</span>
-                    <span className="text-gray-400 text-sm ml-2">({startWeek}주 ~ {endWeek}주)</span>
-                  </div>
-                  <div className="p-3 grid grid-cols-2 md:grid-cols-4 gap-2">
-                    {Array.from({ length: 4 }, (_, weekIndex) => {
-                      const week = startWeek + weekIndex
-                      const visit = patient.weeklyVisits.find(v => v.week === week)
-                      const visited = visit?.visited || false
-                      const missedReason = visit?.missedReason || ''
-
-                      return (
-                        <div key={week} className="space-y-1">
-                          <button
-                            onClick={() => toggleWeeklyVisit(patient.id, week)}
-                            className={`w-full py-2 rounded-lg text-sm font-medium transition ${
-                              visited
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    return (
+                      <tr
+                        key={patient.id}
+                        className="group cursor-pointer transition-all duration-200 hover:bg-gradient-to-r hover:from-stone-100/60 hover:via-white/80 hover:to-stone-100/60 hover:backdrop-blur-sm hover:shadow-[inset_0_0_20px_rgba(120,113,108,0.1)]"
+                        onClick={handleRowClick}
+                      >
+                        {/* 상태 - 1열 고정 */}
+                        <td className="px-2 py-2 text-center sticky left-0 bg-white z-10 group-hover:bg-stone-100/70 transition-colors duration-200 min-w-[60px] w-[60px]">
+                          <select
+                            value={patient.status || 'active'}
+                            onChange={(e) => updatePatientField(patient.id, 'status', e.target.value)}
+                            className={`px-2 py-1 rounded text-xs font-medium cursor-pointer text-center ${
+                              patient.status === 'completed' ? 'bg-green-100 text-green-700' :
+                              patient.status === 'dropout' ? 'bg-red-100 text-red-700' :
+                              'bg-blue-100 text-blue-700'
                             }`}
                           >
-                            {week}주차 {visited ? '✓' : ''}
+                            <option value="active">진행중</option>
+                            <option value="completed">졸업</option>
+                            <option value="dropout">이탈</option>
+                          </select>
+                        </td>
+                        {/* 환자명 - 2열 고정 */}
+                        <td className="px-2 py-2 text-center font-medium sticky left-[60px] bg-white z-10 group-hover:bg-stone-100/70 transition-colors duration-200 border-r border-stone-400">
+                          <span className="px-1 py-1 text-sm font-medium text-amber-800 hover:text-amber-900">
+                            {patient.name || '(이름없음)'}
+                          </span>
+                        </td>
+                        {/* 담당의 */}
+                        <td className="px-2 py-2 text-center">
+                          <input
+                            type="text"
+                            value={patient.doctor || ''}
+                            onChange={(e) => updatePatientField(patient.id, 'doctor', e.target.value)}
+                            className="w-16 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm text-center focus:border-stone-400 focus:outline-none"
+                          />
+                        </td>
+                        {/* 초진일 */}
+                        <td className="px-2 py-2 text-center">
+                          <input
+                            type="date"
+                            value={patient.firstVisitDate || ''}
+                            onChange={(e) => updatePatientField(patient.id, 'firstVisitDate', e.target.value)}
+                            className="w-32 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm focus:border-stone-400 focus:outline-none cursor-pointer"
+                          />
+                        </td>
+                        {/* 연락처 */}
+                        <td className="px-2 py-2 text-center">
+                          <input
+                            type="text"
+                            value={patient.contact || ''}
+                            onChange={(e) => updatePatientField(patient.id, 'contact', e.target.value)}
+                            className="w-28 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm text-center focus:border-stone-400 focus:outline-none"
+                            placeholder="010-0000-0000"
+                          />
+                        </td>
+                        {/* 증상 */}
+                        <td className="px-2 py-2 text-center">
+                          <input
+                            type="text"
+                            value={patient.symptoms || ''}
+                            onChange={(e) => updatePatientField(patient.id, 'symptoms', e.target.value)}
+                            className="w-24 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm text-center focus:border-stone-400 focus:outline-none"
+                          />
+                        </td>
+                        {/* 치료기간 - 드롭다운 */}
+                        <td className="px-2 py-2 text-center border-r-2 border-stone-400">
+                          <select
+                            value={patient.treatmentPeriod || ''}
+                            onChange={(e) => updatePatientField(patient.id, 'treatmentPeriod', e.target.value)}
+                            className="w-28 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent"
+                          >
+                            <option value="">선택</option>
+                            {TREATMENT_PERIOD_OPTIONS.map(opt => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        </td>
+                        {/* 탕약 복약 현황 (6개월) - 각 월별로 날짜/설진/옴니핏 (개별 셀) */}
+                        {[0, 1, 2, 3, 4, 5].map(monthIdx => {
+                          const isDisabled = monthIdx >= treatmentMonths
+                          const hasDate = herbal[monthIdx]?.date
+                          return (
+                            <React.Fragment key={`${patient.id}-herb-${monthIdx}`}>
+                              {/* 날짜 */}
+                              <td className={`px-1 py-2 text-center ${isDisabled ? 'bg-stone-200/70' : 'bg-amber-50/50'}`}>
+                                {isDisabled ? (
+                                  <span className="text-xs text-stone-400 opacity-30">-</span>
+                                ) : hasDate ? (
+                                  <span
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      const input = e.currentTarget.parentElement.querySelector('input')
+                                      if (input) input.showPicker()
+                                    }}
+                                    className="text-[11px] font-medium text-stone-600 cursor-pointer hover:text-amber-700"
+                                  >
+                                    {formatDateShort(herbal[monthIdx].date)}
+                                  </span>
+                                ) : (
+                                  <span
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      const input = e.currentTarget.parentElement.querySelector('input')
+                                      if (input) input.showPicker()
+                                    }}
+                                    className="text-stone-300 cursor-pointer hover:text-stone-500 text-sm"
+                                  >
+                                    +
+                                  </span>
+                                )}
+                                <input
+                                  type="date"
+                                  value={herbal[monthIdx]?.date || ''}
+                                  onChange={(e) => {
+                                    e.stopPropagation()
+                                    const newHerbal = [...herbal]
+                                    newHerbal[monthIdx] = { ...newHerbal[monthIdx], date: e.target.value }
+                                    updatePatientField(patient.id, 'herbal', newHerbal)
+                                  }}
+                                  className="sr-only"
+                                />
+                              </td>
+                              {/* 설진 */}
+                              <td className={`px-1 py-2 text-center ${isDisabled ? 'bg-stone-200/70' : 'bg-amber-50/50'}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={herbal[monthIdx]?.seoljin || false}
+                                  onChange={() => toggleHerbal(patient.id, monthIdx, 'seoljin')}
+                                  disabled={isDisabled}
+                                  className={`w-4 h-4 rounded border-stone-300 text-stone-600 focus:ring-stone-500 ${isDisabled ? 'opacity-30' : ''}`}
+                                />
+                              </td>
+                              {/* 옴니핏 */}
+                              <td className={`px-1 py-2 text-center ${isDisabled ? 'bg-stone-200/70' : 'bg-amber-50/50'} ${monthIdx < 5 ? 'border-r border-amber-100' : 'border-r-2 border-stone-400'}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={herbal[monthIdx]?.omnifit || false}
+                                  onChange={() => toggleHerbal(patient.id, monthIdx, 'omnifit')}
+                                  disabled={isDisabled}
+                                  className={`w-4 h-4 rounded border-stone-300 text-stone-600 focus:ring-stone-500 ${isDisabled ? 'opacity-30' : ''}`}
+                                />
+                              </td>
+                            </React.Fragment>
+                          )
+                        })}
+                        {/* 주차별 내원 */}
+                        {Array.from({ length: 24 }, (_, weekIdx) => {
+                          const monthGroup = Math.floor(weekIdx / 4) + 1
+                          const isCurrentWeek = weekIdx === currentWeekIdx
+                          const yearWeekCode = getWeekYearCode(patient.treatmentStartDate, weekIdx)
+                          const isDisabled = weekIdx >= treatmentWeeks
+                          const isPastWeek = currentWeekIdx >= 0 && weekIdx < currentWeekIdx
+                          const isVisited = weekly[weekIdx]
+                          const isMissed = isPastWeek && !isVisited && !isDisabled
+                          const missedReasons = patient.missedReasons || {}
+                          const hasMissedReason = missedReasons[weekIdx]
+
+                          return (
+                            <td
+                              key={weekIdx}
+                              onClick={(e) => {
+                                if (isMissed) {
+                                  e.stopPropagation()
+                                  setMissedReasonModal({
+                                    patientId: patient.id,
+                                    weekIdx,
+                                    reason: missedReasons[weekIdx] || ''
+                                  })
+                                }
+                              }}
+                              className={`px-1 py-1 text-center relative transition-all duration-150 ${
+                                isDisabled
+                                  ? 'bg-stone-200/70'
+                                  : isMissed
+                                    ? 'bg-red-50 cursor-pointer hover:bg-gradient-to-b hover:from-stone-100/60 hover:via-white/80 hover:to-stone-100/60 hover:shadow-[inset_0_0_10px_rgba(120,113,108,0.15)]'
+                                    : isCurrentWeek
+                                      ? 'bg-green-100'
+                                      : monthGroup % 2 === 0
+                                        ? 'bg-blue-50/50'
+                                        : 'bg-blue-100/30'
+                              } ${(weekIdx + 1) % 4 === 0 && weekIdx < 23 ? 'border-r border-blue-200' : ''} ${weekIdx === 23 ? 'border-r-2 border-stone-400' : ''}`}
+                            >
+                              {isDisabled ? (
+                                <div className="flex flex-col items-center opacity-30">
+                                  <input type="checkbox" disabled className="w-4 h-4 rounded border-stone-300" />
+                                  <span className="text-[9px] text-stone-400 mt-0.5">-</span>
+                                </div>
+                              ) : isMissed ? (
+                                <div className="flex flex-col items-center">
+                                  <span
+                                    className={`text-red-500 font-bold text-sm ${hasMissedReason ? 'underline' : ''}`}
+                                    title={hasMissedReason || '미내원 사유 입력'}
+                                  >
+                                    ✕
+                                  </span>
+                                  {yearWeekCode && (
+                                    <span className="text-[9px] text-red-400 mt-0.5">{yearWeekCode}</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={weekly[weekIdx] || false}
+                                    onChange={() => toggleWeeklyVisit(patient.id, weekIdx)}
+                                    className={`w-4 h-4 rounded border-stone-300 focus:ring-stone-500 ${
+                                      isCurrentWeek ? 'text-green-600' : 'text-stone-600'
+                                    }`}
+                                  />
+                                  {yearWeekCode && (
+                                    <span className="text-[9px] text-stone-400 mt-0.5">{yearWeekCode}</span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          )
+                        })}
+                        {/* 후기 - 드롭다운 */}
+                        <td className="px-2 py-2 text-center border-r-2 border-stone-400">
+                          <select
+                            value={patient.review || ''}
+                            onChange={(e) => updatePatientField(patient.id, 'review', e.target.value)}
+                            className={`w-28 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-xs text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent ${
+                              patient.review === 'video_public' ? 'text-green-600 font-medium' :
+                              patient.review === 'video_private' ? 'text-blue-600 font-medium' :
+                              patient.review === 'written' ? 'text-amber-600 font-medium' : ''
+                            }`}
+                          >
+                            {REVIEW_OPTIONS.map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
+                        </td>
+                        {/* 삭제 */}
+                        <td className="px-2 py-2 text-center">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deletePatient(patient.id) }}
+                            className="text-stone-400 hover:text-red-500 transition"
+                          >
+                            ×
                           </button>
-                          {!visited && visit && (
-                            <input
-                              type="text"
-                              value={missedReason}
-                              onChange={(e) => updateMissedReason(patient.id, week, e.target.value)}
-                              className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-blue-500"
-                              placeholder="미이행 사유"
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </Section>
-
-        {/* 탕/환약 복용 관리 */}
-        <Section title={`탕/환약 복용 관리 (총 ${totalMonths}개월)`}>
-          <div className="space-y-3">
-            {Array.from({ length: totalMonths }, (_, i) => {
-              const month = i + 1
-              const record = herbalRecords.find(r => r.month === month) || { taken: false, type: '', note: '' }
-
-              return (
-                <div key={month} className="border border-gray-100 rounded-lg p-4">
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={() => toggleHerbalTaken(patient.id, month)}
-                      className={`w-24 py-2 rounded-lg text-sm font-medium transition ${
-                        record.taken
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      }`}
-                    >
-                      {month}개월 {record.taken ? '✓' : ''}
-                    </button>
-
-                    <select
-                      value={record.type || ''}
-                      onChange={(e) => updateHerbalRecord(patient.id, month, 'type', e.target.value)}
-                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-emerald-500"
-                    >
-                      <option value="">종류 선택</option>
-                      <option value="탕약">탕약</option>
-                      <option value="환약">환약</option>
-                      <option value="탕약+환약">탕약+환약</option>
-                    </select>
-
-                    <input
-                      type="text"
-                      value={record.note || ''}
-                      onChange={(e) => updateHerbalRecord(patient.id, month, 'note', e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-emerald-500"
-                      placeholder="메모 (예: 가미소요산, 보중익기탕 등)"
-                    />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <p className="text-sm text-gray-500 mt-3">
-            총 <span className="font-medium text-emerald-600">{stats.herbalMonths}개월</span> 복용 완료
-          </p>
-        </Section>
-
-        {/* 상담 기록 */}
-        <Section title="상담 기록">
-          {/* 새 상담 입력 */}
-          <div className="bg-purple-50 p-4 rounded-lg mb-4">
-            <div className="flex flex-col md:flex-row gap-3">
-              <input
-                type="date"
-                value={newConsultation.date}
-                onChange={(e) => setNewConsultation({ ...newConsultation, date: e.target.value })}
-                className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-purple-500 bg-white"
-              />
-              <input
-                type="text"
-                value={newConsultation.comment}
-                onChange={(e) => setNewConsultation({ ...newConsultation, comment: e.target.value })}
-                className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-purple-500 bg-white"
-                placeholder="상담 내용을 입력하세요..."
-                onKeyPress={(e) => e.key === 'Enter' && addConsultation(patient.id)}
-              />
-              <button
-                onClick={() => addConsultation(patient.id)}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm whitespace-nowrap"
-              >
-                + 추가
-              </button>
-            </div>
-          </div>
-
-          {/* 상담 기록 목록 */}
-          {consultations.length === 0 ? (
-            <p className="text-center text-gray-400 py-4">상담 기록이 없습니다.</p>
-          ) : (
-            <div className="space-y-2">
-              {consultations.map(c => (
-                <div key={c.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                  <span className="text-sm font-medium text-purple-600 whitespace-nowrap">{c.date}</span>
-                  <p className="flex-1 text-sm text-gray-700">{c.comment}</p>
-                  <button
-                    onClick={() => deleteConsultation(patient.id, c.id)}
-                    className="text-gray-400 hover:text-red-500 transition text-sm"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
-
-        {/* 원장 메모 */}
-        <Section title="원장 메모">
-          <textarea
-            value={patient.doctorMemo || ''}
-            onChange={(e) => updatePatient(patient.id, { doctorMemo: e.target.value })}
-            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition h-32 resize-none"
-            placeholder="원장만 볼 수 있는 메모..."
-          />
-        </Section>
-
-        {/* 치료 종료 관리 */}
-        <Section title="치료 종료 관리">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-gray-900">치료 종료 여부</p>
-                <p className="text-sm text-gray-500">치료가 완료되면 체크해주세요</p>
-              </div>
-              <button
-                onClick={() => toggleTreatmentComplete(patient.id)}
-                className={`relative w-14 h-8 rounded-full transition ${
-                  patient.isCompleted ? 'bg-blue-600' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow transition-transform ${
-                    patient.isCompleted ? 'translate-x-7' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            </div>
-
-            {patient.isCompleted && (
-              <div className="pt-4 border-t border-gray-100 space-y-3">
-                <p className="text-sm font-medium text-gray-700">후기 관리</p>
-                <label className="flex items-center gap-3 cursor-pointer p-3 bg-amber-50 rounded-lg">
-                  <input
-                    type="checkbox"
-                    checked={patient.hasWrittenReview}
-                    onChange={(e) => updatePatient(patient.id, { hasWrittenReview: e.target.checked })}
-                    className="w-5 h-5 text-amber-600 rounded"
-                  />
-                  <div>
-                    <span className="font-medium text-gray-900">수기후기 작성 완료</span>
-                    <p className="text-sm text-gray-500">환자가 수기 후기를 작성했습니다</p>
-                  </div>
-                </label>
-                <label className="flex items-center gap-3 cursor-pointer p-3 bg-purple-50 rounded-lg">
-                  <input
-                    type="checkbox"
-                    checked={patient.hasVideoInterview}
-                    onChange={(e) => updatePatient(patient.id, { hasVideoInterview: e.target.checked })}
-                    className="w-5 h-5 text-purple-600 rounded"
-                  />
-                  <div>
-                    <span className="font-medium text-gray-900">영상 인터뷰 완료</span>
-                    <p className="text-sm text-gray-500">환자 영상 인터뷰를 진행했습니다</p>
-                  </div>
-                </label>
-              </div>
-            )}
-          </div>
-        </Section>
-      </div>
-    )
-  }
-
-  // 전체 통계 화면
-  const renderOverallStats = () => {
-    const totalPatients = patients.length
-    const activePatients = patients.filter(p => !p.isCompleted).length
-    const completedPatients = patients.filter(p => p.isCompleted).length
-    const avgAdherence = totalPatients > 0
-      ? Math.round(patients.reduce((acc, p) => acc + calculateStats(p).adherenceRate, 0) / totalPatients)
-      : 0
-    const totalHerbalMonths = patients.reduce((acc, p) => acc + calculateStats(p).herbalMonths, 0)
-    const writtenReviews = patients.filter(p => p.hasWrittenReview).length
-    const videoInterviews = patients.filter(p => p.hasVideoInterview).length
-
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setView('list')}
-            className="text-gray-600 hover:text-gray-900"
-          >
-            ← 목록으로
-          </button>
-          <h2 className="text-xl font-semibold text-gray-800">전체 통계</h2>
-        </div>
-
-        {/* 요약 카드 */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 text-center">
-            <div className="text-4xl font-bold text-blue-600">{totalPatients}</div>
-            <div className="text-sm text-gray-500 mt-2">총 환자 수</div>
-          </div>
-          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 text-center">
-            <div className="text-4xl font-bold text-emerald-600">{activePatients}</div>
-            <div className="text-sm text-gray-500 mt-2">치료중</div>
-          </div>
-          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 text-center">
-            <div className="text-4xl font-bold text-gray-600">{completedPatients}</div>
-            <div className="text-sm text-gray-500 mt-2">치료 종료</div>
-          </div>
-          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 text-center">
-            <div className="text-4xl font-bold text-amber-600">{avgAdherence}%</div>
-            <div className="text-sm text-gray-500 mt-2">평균 내원율</div>
-          </div>
-        </div>
-
-        {/* 추가 통계 */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 text-center">
-            <div className="text-3xl font-bold text-emerald-600">{totalHerbalMonths}</div>
-            <div className="text-sm text-gray-500 mt-2">총 탕/환약 복용 (개월)</div>
-          </div>
-          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 text-center">
-            <div className="text-3xl font-bold text-amber-600">{writtenReviews}</div>
-            <div className="text-sm text-gray-500 mt-2">수기후기 완료</div>
-          </div>
-          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 text-center">
-            <div className="text-3xl font-bold text-purple-600">{videoInterviews}</div>
-            <div className="text-sm text-gray-500 mt-2">영상인터뷰 완료</div>
-          </div>
-        </div>
-
-        {/* 환자별 통계 테이블 */}
-        {totalPatients > 0 && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">환자명</th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-500">성별/나이</th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-500">치료기간</th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-500">내원율</th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-500">내원(주)</th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-500">탕/환약(월)</th>
-                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-500">상태</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {patients.map(patient => {
-                    const stats = calculateStats(patient)
-                    return (
-                      <tr key={patient.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-4 text-sm font-medium text-gray-900">{patient.name}</td>
-                        <td className="px-4 py-4 text-sm text-center text-gray-600">
-                          {patient.gender || '-'} / {patient.age ? `${patient.age}세` : '-'}
-                        </td>
-                        <td className="px-4 py-4 text-sm text-center text-gray-600">{patient.treatmentMonths}개월</td>
-                        <td className="px-4 py-4 text-sm text-center">
-                          <span className={`font-medium ${
-                            stats.adherenceRate >= 80 ? 'text-emerald-600' :
-                            stats.adherenceRate >= 50 ? 'text-amber-600' : 'text-red-600'
-                          }`}>
-                            {stats.adherenceRate}%
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-sm text-center text-gray-600">
-                          {stats.visitedWeeks}/{stats.totalWeeks}
-                        </td>
-                        <td className="px-4 py-4 text-sm text-center text-gray-600">
-                          {stats.herbalMonths}/{stats.totalMonths}
-                        </td>
-                        <td className="px-4 py-4 text-sm text-center">
-                          <span className={`px-2 py-1 rounded text-xs ${
-                            patient.isCompleted ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-700'
-                          }`}>
-                            {patient.isCompleted ? '종료' : '치료중'}
-                          </span>
                         </td>
                       </tr>
                     )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                  })
+                )}
+                {/* 접기/펼치기 버튼 행 */}
+                {filteredPatients.length > visibleRows && (
+                  <tr>
+                    <td colSpan={100} className="px-4 py-3 text-center bg-stone-50 border-t-2 border-stone-200">
+                      <button
+                        onClick={() => setIsListCollapsed(!isListCollapsed)}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-stone-200 hover:bg-stone-300 rounded-lg text-sm font-medium text-stone-700 transition"
+                      >
+                        {isListCollapsed ? (
+                          <>
+                            <span>펼치기</span>
+                            <span className="text-stone-500">({filteredPatients.length - visibleRows}명 더보기)</span>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </>
+                        ) : (
+                          <>
+                            <span>접기</span>
+                            <span className="text-stone-500">({visibleRows}명만 표시)</span>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                            </svg>
+                          </>
+                        )}
+                      </button>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
-    )
-  }
+        </div>
 
-  // 클라우드에서 강제 새로고침
-  const handleCloudRefresh = async () => {
-    if (!userId) return
-    setSyncStatus('syncing')
-    const cloudData = await loadFromCloud(userId)
-    if (cloudData) {
-      setPatients(cloudData)
-      savePatients(cloudData)
-      alert('클라우드에서 데이터를 불러왔습니다.')
-    } else {
-      alert('클라우드에 저장된 데이터가 없습니다.')
-    }
-    setSyncStatus('synced')
-  }
-
-  // 동기화 상태 아이콘
-  const getSyncIcon = () => {
-    switch (syncStatus) {
-      case 'syncing': return '↻'
-      case 'synced': return '✓'
-      case 'error': return '!'
-      default: return '○'
-    }
-  }
-
-  const getSyncColor = () => {
-    switch (syncStatus) {
-      case 'syncing': return 'text-yellow-600 animate-spin'
-      case 'synced': return 'text-green-600'
-      case 'error': return 'text-red-600'
-      default: return 'text-gray-400'
-    }
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* 동기화 설정 모달 */}
-      {showSyncModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900">클라우드 동기화 설정</h3>
-
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">내 동기화 ID</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={userId}
-                  readOnly
-                  className="flex-1 px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-sm font-mono"
-                />
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(userId)
-                    alert('ID가 복사되었습니다.')
-                  }}
-                  className="px-3 py-2 bg-gray-200 rounded-lg text-sm hover:bg-gray-300"
-                >
-                  복사
-                </button>
-              </div>
-              <p className="text-xs text-gray-500">
-                다른 기기에서 이 ID를 입력하면 데이터를 동기화할 수 있습니다.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">다른 기기의 ID로 동기화</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="user_xxxxx..."
-                  id="otherUserId"
-                  className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono"
-                />
-                <button
-                  onClick={async () => {
-                    const otherId = document.getElementById('otherUserId').value.trim()
-                    if (!otherId) return
-
-                    if (confirm('다른 기기의 데이터로 현재 데이터를 덮어쓰시겠습니까?')) {
-                      localStorage.setItem('hanuiwon_user_id', otherId)
-                      setUserId(otherId)
-                      setSyncStatus('syncing')
-                      const cloudData = await loadFromCloud(otherId)
-                      if (cloudData) {
-                        setPatients(cloudData)
-                        savePatients(cloudData)
-                        alert('데이터를 동기화했습니다.')
-                      } else {
-                        alert('해당 ID의 데이터가 없습니다.')
-                      }
-                      setSyncStatus('synced')
-                      setShowSyncModal(false)
-                    }
-                  }}
-                  className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-                >
-                  동기화
-                </button>
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-4 border-t">
-              <button
-                onClick={handleCloudRefresh}
-                className="flex-1 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm"
+        {/* 통계 및 접기 컨트롤 */}
+        <div className="mt-4 flex items-center justify-between">
+          <div className="flex gap-4 text-sm text-stone-600">
+            <span>현재 탭: <strong className="text-stone-800">{filteredPatients.length}</strong>명</span>
+            {isListCollapsed && filteredPatients.length > visibleRows && (
+              <>
+                <span className="text-stone-400">|</span>
+                <span>표시 중: <strong className="text-stone-800">{Math.min(visibleRows, filteredPatients.length)}</strong>명</span>
+              </>
+            )}
+            <span className="text-stone-400">|</span>
+            <span>전체: <strong className="text-stone-800">{patients.length}</strong>명</span>
+            <span className="text-stone-400">|</span>
+            <span>오늘: {getTodayYearWeek().code} ({getTodayYearWeek().year}년 {getTodayYearWeek().week}주차)</span>
+          </div>
+          {/* 표시 행 수 설정 */}
+          {filteredPatients.length > 5 && (
+            <div className="flex items-center gap-2 text-sm text-stone-600">
+              <span>표시 행 수:</span>
+              <select
+                value={visibleRows}
+                onChange={(e) => setVisibleRows(Number(e.target.value))}
+                className="px-2 py-1 border border-stone-300 rounded text-sm"
               >
-                클라우드에서 불러오기
+                <option value={5}>5개</option>
+                <option value={10}>10개</option>
+                <option value={15}>15개</option>
+                <option value={20}>20개</option>
+                <option value={30}>30개</option>
+              </select>
+              <button
+                onClick={() => setIsListCollapsed(!isListCollapsed)}
+                className={`px-3 py-1 rounded text-sm font-medium transition ${
+                  isListCollapsed
+                    ? 'bg-stone-200 text-stone-700 hover:bg-stone-300'
+                    : 'bg-stone-700 text-white hover:bg-stone-800'
+                }`}
+              >
+                {isListCollapsed ? '전체 보기' : '접기 모드'}
+              </button>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* 환자 등록 모달 */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold text-stone-800">새 환자 등록</h3>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">담당의</label>
+                <input
+                  type="text"
+                  value={newPatient.doctor}
+                  onChange={(e) => setNewPatient({ ...newPatient, doctor: e.target.value })}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">환자명 *</label>
+                <input
+                  type="text"
+                  value={newPatient.name}
+                  onChange={(e) => setNewPatient({ ...newPatient, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">연락처</label>
+                <input
+                  type="text"
+                  value={newPatient.contact}
+                  onChange={(e) => setNewPatient({ ...newPatient, contact: e.target.value })}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                  placeholder="010-0000-0000"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">초진일</label>
+                <input
+                  type="date"
+                  value={newPatient.firstVisitDate}
+                  onChange={(e) => setNewPatient({ ...newPatient, firstVisitDate: e.target.value })}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">치료시작일</label>
+                <input
+                  type="date"
+                  value={newPatient.treatmentStartDate}
+                  onChange={(e) => setNewPatient({ ...newPatient, treatmentStartDate: e.target.value })}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">증상</label>
+                <input
+                  type="text"
+                  value={newPatient.symptoms}
+                  onChange={(e) => setNewPatient({ ...newPatient, symptoms: e.target.value })}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">치료기간</label>
+                <select
+                  value={newPatient.treatmentPeriod}
+                  onChange={(e) => setNewPatient({ ...newPatient, treatmentPeriod: e.target.value })}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                >
+                  {TREATMENT_PERIOD_OPTIONS.map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-4">
+              <button
+                onClick={handleAddPatient}
+                className="flex-1 py-2 bg-stone-700 text-white rounded-lg hover:bg-stone-800 transition"
+              >
+                등록
               </button>
               <button
-                onClick={() => setShowSyncModal(false)}
-                className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm"
+                onClick={() => setShowAddModal(false)}
+                className="flex-1 py-2 bg-stone-200 text-stone-700 rounded-lg hover:bg-stone-300 transition"
               >
-                닫기
+                취소
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 헤더 */}
-      <header className="bg-white shadow-sm border-b border-gray-100 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <div className="flex items-center gap-3">
-            <h1
-              className="text-2xl font-bold text-gray-900 cursor-pointer"
-              onClick={() => setView('list')}
-            >
-              한의원 환자 관리 차트
-            </h1>
-            {/* 동기화 상태 표시 */}
-            <button
-              onClick={() => setShowSyncModal(true)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs border ${getSyncColor()}`}
-              title="클라우드 동기화 설정"
-            >
-              <span className={syncStatus === 'syncing' ? 'animate-spin' : ''}>{getSyncIcon()}</span>
-              <span className="hidden sm:inline">
-                {syncStatus === 'syncing' ? '동기화 중' : syncStatus === 'synced' ? '동기화됨' : syncStatus === 'error' ? '오류' : '대기'}
-              </span>
-            </button>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={handleManualSave}
-              className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm"
-            >
-              저장
-            </button>
-            <button
-              onClick={handleExportJSON}
-              className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm"
-            >
-              JSON 내보내기
-            </button>
-            <label className="px-3 py-1.5 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition text-sm cursor-pointer">
-              JSON 가져오기
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleImportJSON}
-                className="hidden"
-              />
-            </label>
+      {/* 환자 세부정보 모달 */}
+      {selectedPatient && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-lg w-full space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-stone-800">환자 세부정보</h3>
+              <button
+                onClick={() => setSelectedPatient(null)}
+                className="text-stone-400 hover:text-stone-600 text-xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* 기본 정보 */}
+              <div className="bg-stone-50 rounded-lg p-4 space-y-3">
+                <h4 className="font-medium text-stone-700 border-b border-stone-200 pb-2">기본 정보</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">환자명</label>
+                    <input
+                      type="text"
+                      value={selectedPatient.name || ''}
+                      onChange={(e) => {
+                        const updated = { ...selectedPatient, name: e.target.value }
+                        setSelectedPatient(updated)
+                        updatePatientField(selectedPatient.id, 'name', e.target.value)
+                      }}
+                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">담당의</label>
+                    <input
+                      type="text"
+                      value={selectedPatient.doctor || ''}
+                      onChange={(e) => {
+                        const updated = { ...selectedPatient, doctor: e.target.value }
+                        setSelectedPatient(updated)
+                        updatePatientField(selectedPatient.id, 'doctor', e.target.value)
+                      }}
+                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">연락처</label>
+                    <input
+                      type="text"
+                      value={selectedPatient.contact || ''}
+                      onChange={(e) => {
+                        const updated = { ...selectedPatient, contact: e.target.value }
+                        setSelectedPatient(updated)
+                        updatePatientField(selectedPatient.id, 'contact', e.target.value)
+                      }}
+                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                      placeholder="010-0000-0000"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">증상</label>
+                    <input
+                      type="text"
+                      value={selectedPatient.symptoms || ''}
+                      onChange={(e) => {
+                        const updated = { ...selectedPatient, symptoms: e.target.value }
+                        setSelectedPatient(updated)
+                        updatePatientField(selectedPatient.id, 'symptoms', e.target.value)
+                      }}
+                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 치료 정보 */}
+              <div className="bg-blue-50 rounded-lg p-4 space-y-3">
+                <h4 className="font-medium text-blue-700 border-b border-blue-200 pb-2">치료 정보</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">초진일</label>
+                    <input
+                      type="date"
+                      value={selectedPatient.firstVisitDate || ''}
+                      onChange={(e) => {
+                        const updated = { ...selectedPatient, firstVisitDate: e.target.value }
+                        setSelectedPatient(updated)
+                        updatePatientField(selectedPatient.id, 'firstVisitDate', e.target.value)
+                      }}
+                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">치료시작일</label>
+                    <input
+                      type="date"
+                      value={selectedPatient.treatmentStartDate || ''}
+                      onChange={(e) => {
+                        const updated = { ...selectedPatient, treatmentStartDate: e.target.value }
+                        setSelectedPatient(updated)
+                        updatePatientField(selectedPatient.id, 'treatmentStartDate', e.target.value)
+                      }}
+                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">치료기간</label>
+                    <select
+                      value={selectedPatient.treatmentPeriod || ''}
+                      onChange={(e) => {
+                        const updated = { ...selectedPatient, treatmentPeriod: e.target.value }
+                        setSelectedPatient(updated)
+                        updatePatientField(selectedPatient.id, 'treatmentPeriod', e.target.value)
+                      }}
+                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                    >
+                      <option value="">선택</option>
+                      {TREATMENT_PERIOD_OPTIONS.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">상태</label>
+                    <select
+                      value={selectedPatient.status || 'active'}
+                      onChange={(e) => {
+                        const updated = { ...selectedPatient, status: e.target.value }
+                        setSelectedPatient(updated)
+                        updatePatientField(selectedPatient.id, 'status', e.target.value)
+                      }}
+                      className={`w-full px-3 py-2 rounded-lg text-sm cursor-pointer ${
+                        selectedPatient.status === 'completed' ? 'bg-green-100 text-green-700 border-green-300' :
+                        selectedPatient.status === 'dropout' ? 'bg-red-100 text-red-700 border-red-300' :
+                        'bg-blue-100 text-blue-700 border-blue-300'
+                      } border`}
+                    >
+                      <option value="active">진행중</option>
+                      <option value="completed">졸업</option>
+                      <option value="dropout">이탈</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* 후기 */}
+              <div className="bg-amber-50 rounded-lg p-4 space-y-3">
+                <h4 className="font-medium text-amber-700 border-b border-amber-200 pb-2">후기</h4>
+                <select
+                  value={selectedPatient.review || ''}
+                  onChange={(e) => {
+                    const updated = { ...selectedPatient, review: e.target.value }
+                    setSelectedPatient(updated)
+                    updatePatientField(selectedPatient.id, 'review', e.target.value)
+                  }}
+                  className={`w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer ${
+                    selectedPatient.review === 'video_public' ? 'bg-green-50 text-green-700' :
+                    selectedPatient.review === 'video_private' ? 'bg-blue-50 text-blue-700' :
+                    selectedPatient.review === 'written' ? 'bg-amber-50 text-amber-700' : ''
+                  }`}
+                >
+                  {REVIEW_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 현재 주차 정보 */}
+              {selectedPatient.treatmentStartDate && (
+                <div className="bg-green-50 rounded-lg p-4">
+                  <h4 className="font-medium text-green-700 border-b border-green-200 pb-2 mb-2">진행 현황</h4>
+                  <div className="text-sm text-green-800">
+                    <p>오늘: <strong>{getTodayYearWeek().code}</strong> ({getTodayYearWeek().year}년 {getTodayYearWeek().week}주차)</p>
+                    {getCurrentWeekIndex(selectedPatient.treatmentStartDate) >= 0 && (
+                      <p>치료 <strong>{getCurrentWeekIndex(selectedPatient.treatmentStartDate) + 1}주차</strong> 진행 중</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-4">
+              <button
+                onClick={() => setSelectedPatient(null)}
+                className="flex-1 py-2 bg-stone-700 text-white rounded-lg hover:bg-stone-800 transition"
+              >
+                닫기
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm('정말 삭제하시겠습니까?')) {
+                    deletePatient(selectedPatient.id)
+                    setSelectedPatient(null)
+                  }
+                }}
+                className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition"
+              >
+                삭제
+              </button>
+            </div>
           </div>
         </div>
-      </header>
+      )}
 
-      {/* 메인 컨텐츠 */}
-      <main className="max-w-5xl mx-auto px-6 py-8">
-        {view === 'list' && renderPatientList()}
-        {view === 'add' && renderAddPatient()}
-        {view === 'detail' && renderPatientDetail()}
-        {view === 'stats' && renderOverallStats()}
-      </main>
+      {/* 미내원 사유 입력 모달 */}
+      {missedReasonModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-sm w-full space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-stone-800">미내원 사유</h3>
+              <button
+                onClick={() => setMissedReasonModal(null)}
+                className="text-stone-400 hover:text-stone-600 text-xl"
+              >
+                ×
+              </button>
+            </div>
+            <p className="text-sm text-stone-500">
+              {missedReasonModal.weekIdx + 1}주차 미내원 사유를 입력하세요.
+            </p>
+            <textarea
+              value={missedReasonModal.reason}
+              onChange={(e) => setMissedReasonModal({ ...missedReasonModal, reason: e.target.value })}
+              rows={3}
+              className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+              placeholder="예: 개인 사정, 출장, 건강 문제 등"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  const patient = patients.find(p => p.id === missedReasonModal.patientId)
+                  if (patient) {
+                    const newMissedReasons = { ...(patient.missedReasons || {}), [missedReasonModal.weekIdx]: missedReasonModal.reason }
+                    updatePatientField(missedReasonModal.patientId, 'missedReasons', newMissedReasons)
+                  }
+                  setMissedReasonModal(null)
+                }}
+                className="flex-1 py-2 bg-stone-700 text-white rounded-lg hover:bg-stone-800 transition"
+              >
+                저장
+              </button>
+              <button
+                onClick={() => {
+                  // 내원으로 변경
+                  toggleWeeklyVisit(missedReasonModal.patientId, missedReasonModal.weekIdx)
+                  setMissedReasonModal(null)
+                }}
+                className="flex-1 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition"
+              >
+                내원으로 변경
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
