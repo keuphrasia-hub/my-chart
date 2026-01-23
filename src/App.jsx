@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { getUserId, loadAllPatients, insertPatient, updatePatient as updatePatientInDB, deletePatientFromDB, subscribeToPatients, unsubscribe } from './supabase'
 
-// localStorage 키
-const STORAGE_KEY = 'bonhyang_patients_v8'
+// localStorage 키 (v9: 데이터 초기화)
+const STORAGE_KEY = 'bonhyang_patients_v9'
 
 // 초기 데이터 로드
 const loadPatients = () => {
@@ -67,19 +67,28 @@ const getCurrentWeekIndex = (treatmentStartDate) => {
   return -1
 }
 
-// 치료기간 옵션
-const TREATMENT_PERIOD_OPTIONS = [
-  '1개월 / 주1회',
-  '1개월 / 주2회',
-  '1개월 / 주3회',
-  '2개월 / 주1회',
-  '2개월 / 주2회',
-  '3개월 / 주1회',
-  '3개월 / 주2회',
-  '3개월 / 주3회',
-  '6개월 / 주1회',
-  '6개월 / 주2회',
-]
+// 치료기간 옵션 (개월)
+const TREATMENT_MONTHS_OPTIONS = [0, 1, 2, 3, 4, 5, 6]
+
+// 주당 치료횟수 옵션
+const VISITS_PER_WEEK_OPTIONS = [0, 1, 2, 3]
+
+// 치료기간 문자열 파싱
+const parseTreatmentPeriod = (period) => {
+  if (!period) return { months: 0, visits: 0 }
+  const monthMatch = period.match(/(\d+)개월/)
+  const visitMatch = period.match(/주(\d+)회/)
+  return {
+    months: monthMatch ? parseInt(monthMatch[1]) : 0,
+    visits: visitMatch ? parseInt(visitMatch[1]) : 0
+  }
+}
+
+// 치료기간 문자열 생성
+const formatTreatmentPeriod = (months, visits) => {
+  if (months === 0 && visits === 0) return ''
+  return `${months}개월 / 주${visits}회`
+}
 
 // 탭 종류
 const TABS = [
@@ -133,7 +142,7 @@ function App() {
     name: '',
     contact: '',
     symptoms: '',
-    treatmentPeriod: '3개월 / 주2회',
+    treatmentPeriod: '',
   })
 
   const channelRef = useRef(null)
@@ -274,7 +283,7 @@ function App() {
       name: '',
       contact: '',
       symptoms: '',
-      treatmentPeriod: '3개월 / 주2회',
+      treatmentPeriod: '',
     })
     setShowAddModal(false)
   }
@@ -658,18 +667,34 @@ function App() {
                             className="w-24 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm text-center focus:border-stone-400 focus:outline-none"
                           />
                         </td>
-                        {/* 치료기간 - 드롭다운 */}
+                        {/* 치료기간 - 개월/주당횟수 드롭다운 */}
                         <td className="px-2 py-2 text-center border-r-2 border-stone-400">
-                          <select
-                            value={patient.treatmentPeriod || ''}
-                            onChange={(e) => updatePatientField(patient.id, 'treatmentPeriod', e.target.value)}
-                            className="w-28 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent"
-                          >
-                            <option value="">선택</option>
-                            {TREATMENT_PERIOD_OPTIONS.map(opt => (
-                              <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                          </select>
+                          <div className="flex items-center justify-center gap-1">
+                            <select
+                              value={parseTreatmentPeriod(patient.treatmentPeriod).months}
+                              onChange={(e) => {
+                                const current = parseTreatmentPeriod(patient.treatmentPeriod)
+                                updatePatientField(patient.id, 'treatmentPeriod', formatTreatmentPeriod(parseInt(e.target.value), current.visits))
+                              }}
+                              className="w-14 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-xs text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent"
+                            >
+                              {TREATMENT_MONTHS_OPTIONS.map(m => (
+                                <option key={m} value={m}>{m}개월</option>
+                              ))}
+                            </select>
+                            <select
+                              value={parseTreatmentPeriod(patient.treatmentPeriod).visits}
+                              onChange={(e) => {
+                                const current = parseTreatmentPeriod(patient.treatmentPeriod)
+                                updatePatientField(patient.id, 'treatmentPeriod', formatTreatmentPeriod(current.months, parseInt(e.target.value)))
+                              }}
+                              className="w-14 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-xs text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent"
+                            >
+                              {VISITS_PER_WEEK_OPTIONS.map(v => (
+                                <option key={v} value={v}>주{v}회</option>
+                              ))}
+                            </select>
+                          </div>
                         </td>
                         {/* 탕약 복약 현황 (6개월) - 각 월별로 날짜/설진/옴니핏 (개별 셀) */}
                         {[0, 1, 2, 3, 4, 5].map(monthIdx => {
@@ -983,15 +1008,32 @@ function App() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-1">치료기간</label>
-                <select
-                  value={newPatient.treatmentPeriod}
-                  onChange={(e) => setNewPatient({ ...newPatient, treatmentPeriod: e.target.value })}
-                  className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
-                >
-                  {TREATMENT_PERIOD_OPTIONS.map(opt => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
+                <div className="flex gap-2">
+                  <select
+                    value={parseTreatmentPeriod(newPatient.treatmentPeriod).months}
+                    onChange={(e) => {
+                      const current = parseTreatmentPeriod(newPatient.treatmentPeriod)
+                      setNewPatient({ ...newPatient, treatmentPeriod: formatTreatmentPeriod(parseInt(e.target.value), current.visits) })
+                    }}
+                    className="flex-1 px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                  >
+                    {TREATMENT_MONTHS_OPTIONS.map(m => (
+                      <option key={m} value={m}>{m}개월</option>
+                    ))}
+                  </select>
+                  <select
+                    value={parseTreatmentPeriod(newPatient.treatmentPeriod).visits}
+                    onChange={(e) => {
+                      const current = parseTreatmentPeriod(newPatient.treatmentPeriod)
+                      setNewPatient({ ...newPatient, treatmentPeriod: formatTreatmentPeriod(current.months, parseInt(e.target.value)) })
+                    }}
+                    className="flex-1 px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                  >
+                    {VISITS_PER_WEEK_OPTIONS.map(v => (
+                      <option key={v} value={v}>주{v}회</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -1120,20 +1162,38 @@ function App() {
                   </div>
                   <div>
                     <label className="block text-xs text-stone-500 mb-1">치료기간</label>
-                    <select
-                      value={selectedPatient.treatmentPeriod || ''}
-                      onChange={(e) => {
-                        const updated = { ...selectedPatient, treatmentPeriod: e.target.value }
-                        setSelectedPatient(updated)
-                        updatePatientField(selectedPatient.id, 'treatmentPeriod', e.target.value)
-                      }}
-                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
-                    >
-                      <option value="">선택</option>
-                      {TREATMENT_PERIOD_OPTIONS.map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
+                    <div className="flex gap-2">
+                      <select
+                        value={parseTreatmentPeriod(selectedPatient.treatmentPeriod).months}
+                        onChange={(e) => {
+                          const current = parseTreatmentPeriod(selectedPatient.treatmentPeriod)
+                          const newPeriod = formatTreatmentPeriod(parseInt(e.target.value), current.visits)
+                          const updated = { ...selectedPatient, treatmentPeriod: newPeriod }
+                          setSelectedPatient(updated)
+                          updatePatientField(selectedPatient.id, 'treatmentPeriod', newPeriod)
+                        }}
+                        className="flex-1 px-2 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                      >
+                        {TREATMENT_MONTHS_OPTIONS.map(m => (
+                          <option key={m} value={m}>{m}개월</option>
+                        ))}
+                      </select>
+                      <select
+                        value={parseTreatmentPeriod(selectedPatient.treatmentPeriod).visits}
+                        onChange={(e) => {
+                          const current = parseTreatmentPeriod(selectedPatient.treatmentPeriod)
+                          const newPeriod = formatTreatmentPeriod(current.months, parseInt(e.target.value))
+                          const updated = { ...selectedPatient, treatmentPeriod: newPeriod }
+                          setSelectedPatient(updated)
+                          updatePatientField(selectedPatient.id, 'treatmentPeriod', newPeriod)
+                        }}
+                        className="flex-1 px-2 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                      >
+                        {VISITS_PER_WEEK_OPTIONS.map(v => (
+                          <option key={v} value={v}>주{v}회</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-xs text-stone-500 mb-1">상태</label>
