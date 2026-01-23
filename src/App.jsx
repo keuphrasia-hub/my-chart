@@ -183,27 +183,7 @@ function App() {
       setSyncStatus('syncing')
 
       // 로컬 데이터가 없으면 샘플 데이터 로드
-      const localData = loadPatients()
-      if (localData.length === 0) {
-        try {
-          const res = await fetch('/sample_patients.json')
-          if (res.ok) {
-            const sampleData = await res.json()
-            if (sampleData && sampleData.length > 0) {
-              // 이탈 여부 체크 (결과평가에 '이탈' 포함된 경우)
-              const processedData = sampleData.map(p => ({
-                ...p,
-                status: p.resultEval?.includes('이탈') ? 'dropout' : 'active'
-              }))
-              setPatients(processedData)
-              savePatients(processedData)
-              console.log('[App] 샘플 데이터 로드:', processedData.length, '명')
-            }
-          }
-        } catch (e) {
-          console.log('[App] 샘플 데이터 없음')
-        }
-      }
+      // 샘플 데이터 로드 제거됨 - 빈 상태로 시작
 
       const cloudData = await loadAllPatients(id)
       if (cloudData && cloudData.length > 0) {
