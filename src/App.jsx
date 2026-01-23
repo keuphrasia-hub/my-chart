@@ -89,24 +89,29 @@ const getCurrentWeekIndex = (treatmentStartDate) => {
 // 치료기간 옵션 (개월)
 const TREATMENT_MONTHS_OPTIONS = [0, 1, 2, 3, 4, 5, 6]
 
-// 주당 치료횟수 옵션
-const VISITS_PER_WEEK_OPTIONS = [0, 1, 2, 3]
+// 주 옵션
+const TREATMENT_WEEKS_OPTIONS = [0, 1, 2, 3, 4]
+
+// 회 옵션
+const VISITS_OPTIONS = [0, 1, 2, 3]
 
 // 치료기간 문자열 파싱
 const parseTreatmentPeriod = (period) => {
-  if (!period) return { months: 0, visits: 0 }
+  if (!period) return { months: 0, weeks: 0, visits: 0 }
   const monthMatch = period.match(/(\d+)개월/)
-  const visitMatch = period.match(/주(\d+)회/)
+  const weekMatch = period.match(/(\d+)주/)
+  const visitMatch = period.match(/(\d+)회/)
   return {
     months: monthMatch ? parseInt(monthMatch[1]) : 0,
+    weeks: weekMatch ? parseInt(weekMatch[1]) : 0,
     visits: visitMatch ? parseInt(visitMatch[1]) : 0
   }
 }
 
 // 치료기간 문자열 생성
-const formatTreatmentPeriod = (months, visits) => {
-  if (months === 0 && visits === 0) return ''
-  return `${months}개월 / 주${visits}회`
+const formatTreatmentPeriod = (months, weeks, visits) => {
+  if (months === 0 && weeks === 0 && visits === 0) return ''
+  return `${months}개월 ${weeks}주에 ${visits}회`
 }
 
 // 탭 종류
@@ -686,31 +691,43 @@ function App() {
                             className="w-24 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm text-center focus:border-stone-400 focus:outline-none"
                           />
                         </td>
-                        {/* 치료기간 - 개월/주당횟수 드롭다운 */}
+                        {/* 치료기간 - 개월/주/회 드롭다운 */}
                         <td className="px-2 py-2 text-center border-r-2 border-stone-400">
-                          <div className="flex items-center justify-center gap-1">
+                          <div className="flex items-center justify-center gap-0.5">
                             <select
                               value={parseTreatmentPeriod(patient.treatmentPeriod).months}
                               onChange={(e) => {
                                 const current = parseTreatmentPeriod(patient.treatmentPeriod)
-                                updatePatientField(patient.id, 'treatmentPeriod', formatTreatmentPeriod(parseInt(e.target.value), current.visits))
+                                updatePatientField(patient.id, 'treatmentPeriod', formatTreatmentPeriod(parseInt(e.target.value), current.weeks, current.visits))
                               }}
-                              className="w-14 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-xs text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent"
+                              className="w-12 px-0.5 py-1 border border-transparent hover:border-stone-300 rounded text-xs text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent"
                             >
                               {TREATMENT_MONTHS_OPTIONS.map(m => (
                                 <option key={m} value={m}>{m}개월</option>
                               ))}
                             </select>
                             <select
+                              value={parseTreatmentPeriod(patient.treatmentPeriod).weeks}
+                              onChange={(e) => {
+                                const current = parseTreatmentPeriod(patient.treatmentPeriod)
+                                updatePatientField(patient.id, 'treatmentPeriod', formatTreatmentPeriod(current.months, parseInt(e.target.value), current.visits))
+                              }}
+                              className="w-12 px-0.5 py-1 border border-transparent hover:border-stone-300 rounded text-xs text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent"
+                            >
+                              {TREATMENT_WEEKS_OPTIONS.map(w => (
+                                <option key={w} value={w}>{w}주</option>
+                              ))}
+                            </select>
+                            <select
                               value={parseTreatmentPeriod(patient.treatmentPeriod).visits}
                               onChange={(e) => {
                                 const current = parseTreatmentPeriod(patient.treatmentPeriod)
-                                updatePatientField(patient.id, 'treatmentPeriod', formatTreatmentPeriod(current.months, parseInt(e.target.value)))
+                                updatePatientField(patient.id, 'treatmentPeriod', formatTreatmentPeriod(current.months, current.weeks, parseInt(e.target.value)))
                               }}
-                              className="w-14 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-xs text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent"
+                              className="w-12 px-0.5 py-1 border border-transparent hover:border-stone-300 rounded text-xs text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent"
                             >
-                              {VISITS_PER_WEEK_OPTIONS.map(v => (
-                                <option key={v} value={v}>주{v}회</option>
+                              {VISITS_OPTIONS.map(v => (
+                                <option key={v} value={v}>{v}회</option>
                               ))}
                             </select>
                           </div>
@@ -1032,7 +1049,7 @@ function App() {
                     value={parseTreatmentPeriod(newPatient.treatmentPeriod).months}
                     onChange={(e) => {
                       const current = parseTreatmentPeriod(newPatient.treatmentPeriod)
-                      setNewPatient({ ...newPatient, treatmentPeriod: formatTreatmentPeriod(parseInt(e.target.value), current.visits) })
+                      setNewPatient({ ...newPatient, treatmentPeriod: formatTreatmentPeriod(parseInt(e.target.value), current.weeks, current.visits) })
                     }}
                     className="flex-1 px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
                   >
@@ -1041,15 +1058,27 @@ function App() {
                     ))}
                   </select>
                   <select
-                    value={parseTreatmentPeriod(newPatient.treatmentPeriod).visits}
+                    value={parseTreatmentPeriod(newPatient.treatmentPeriod).weeks}
                     onChange={(e) => {
                       const current = parseTreatmentPeriod(newPatient.treatmentPeriod)
-                      setNewPatient({ ...newPatient, treatmentPeriod: formatTreatmentPeriod(current.months, parseInt(e.target.value)) })
+                      setNewPatient({ ...newPatient, treatmentPeriod: formatTreatmentPeriod(current.months, parseInt(e.target.value), current.visits) })
                     }}
                     className="flex-1 px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
                   >
-                    {VISITS_PER_WEEK_OPTIONS.map(v => (
-                      <option key={v} value={v}>주{v}회</option>
+                    {TREATMENT_WEEKS_OPTIONS.map(w => (
+                      <option key={w} value={w}>{w}주</option>
+                    ))}
+                  </select>
+                  <select
+                    value={parseTreatmentPeriod(newPatient.treatmentPeriod).visits}
+                    onChange={(e) => {
+                      const current = parseTreatmentPeriod(newPatient.treatmentPeriod)
+                      setNewPatient({ ...newPatient, treatmentPeriod: formatTreatmentPeriod(current.months, current.weeks, parseInt(e.target.value)) })
+                    }}
+                    className="flex-1 px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                  >
+                    {VISITS_OPTIONS.map(v => (
+                      <option key={v} value={v}>{v}회</option>
                     ))}
                   </select>
                 </div>
@@ -1186,7 +1215,7 @@ function App() {
                         value={parseTreatmentPeriod(selectedPatient.treatmentPeriod).months}
                         onChange={(e) => {
                           const current = parseTreatmentPeriod(selectedPatient.treatmentPeriod)
-                          const newPeriod = formatTreatmentPeriod(parseInt(e.target.value), current.visits)
+                          const newPeriod = formatTreatmentPeriod(parseInt(e.target.value), current.weeks, current.visits)
                           const updated = { ...selectedPatient, treatmentPeriod: newPeriod }
                           setSelectedPatient(updated)
                           updatePatientField(selectedPatient.id, 'treatmentPeriod', newPeriod)
@@ -1198,18 +1227,33 @@ function App() {
                         ))}
                       </select>
                       <select
-                        value={parseTreatmentPeriod(selectedPatient.treatmentPeriod).visits}
+                        value={parseTreatmentPeriod(selectedPatient.treatmentPeriod).weeks}
                         onChange={(e) => {
                           const current = parseTreatmentPeriod(selectedPatient.treatmentPeriod)
-                          const newPeriod = formatTreatmentPeriod(current.months, parseInt(e.target.value))
+                          const newPeriod = formatTreatmentPeriod(current.months, parseInt(e.target.value), current.visits)
                           const updated = { ...selectedPatient, treatmentPeriod: newPeriod }
                           setSelectedPatient(updated)
                           updatePatientField(selectedPatient.id, 'treatmentPeriod', newPeriod)
                         }}
                         className="flex-1 px-2 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
                       >
-                        {VISITS_PER_WEEK_OPTIONS.map(v => (
-                          <option key={v} value={v}>주{v}회</option>
+                        {TREATMENT_WEEKS_OPTIONS.map(w => (
+                          <option key={w} value={w}>{w}주</option>
+                        ))}
+                      </select>
+                      <select
+                        value={parseTreatmentPeriod(selectedPatient.treatmentPeriod).visits}
+                        onChange={(e) => {
+                          const current = parseTreatmentPeriod(selectedPatient.treatmentPeriod)
+                          const newPeriod = formatTreatmentPeriod(current.months, current.weeks, parseInt(e.target.value))
+                          const updated = { ...selectedPatient, treatmentPeriod: newPeriod }
+                          setSelectedPatient(updated)
+                          updatePatientField(selectedPatient.id, 'treatmentPeriod', newPeriod)
+                        }}
+                        className="flex-1 px-2 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                      >
+                        {VISITS_OPTIONS.map(v => (
+                          <option key={v} value={v}>{v}회</option>
                         ))}
                       </select>
                     </div>
