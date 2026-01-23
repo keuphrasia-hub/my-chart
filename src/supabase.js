@@ -6,15 +6,16 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 // Supabase 클라이언트 생성
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-// 사용자 ID (모든 기기 공유 - 본향한의원 전용)
-export const getUserId = () => {
-  return 'bonhyang_clinic_shared'
-}
+// 공유 사용자 ID (모든 기기 동일)
+const SHARED_USER_ID = 'bonhyang_clinic_shared'
 
-// 사용자 ID 설정 (다른 기기 동기화용)
-export const setUserId = (newUserId) => {
-  localStorage.setItem('hanuiwon_user_id', newUserId)
-  return newUserId
+// 사용자 ID 반환 (항상 공유 ID)
+export const getUserId = () => {
+  // 기존 localStorage의 개별 user_id 삭제 (충돌 방지)
+  if (localStorage.getItem('hanuiwon_user_id')) {
+    localStorage.removeItem('hanuiwon_user_id')
+  }
+  return SHARED_USER_ID
 }
 
 // ============ CRUD 함수들 ============
