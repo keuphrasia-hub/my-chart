@@ -6,14 +6,9 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 // Supabase 클라이언트 생성
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-// 사용자 ID 생성/가져오기 (기기별 고유 ID)
+// 사용자 ID (모든 기기 공유 - 본향한의원 전용)
 export const getUserId = () => {
-  let userId = localStorage.getItem('hanuiwon_user_id')
-  if (!userId) {
-    userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
-    localStorage.setItem('hanuiwon_user_id', userId)
-  }
-  return userId
+  return 'bonhyang_clinic_shared'
 }
 
 // 사용자 ID 설정 (다른 기기 동기화용)
