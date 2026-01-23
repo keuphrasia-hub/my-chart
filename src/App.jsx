@@ -3,9 +3,12 @@ import { getUserId, loadAllPatients, insertPatient, updatePatient as updatePatie
 
 // localStorage 키 (v10: 데이터 완전 초기화)
 const STORAGE_KEY = 'bonhyang_patients_v10'
+const MIGRATION_KEY = 'bonhyang_migrated_v10'
 
-// 이전 버전 데이터 모두 삭제
+// 이전 버전 데이터 모두 삭제 (한 번만 실행)
 const clearOldData = () => {
+  if (localStorage.getItem(MIGRATION_KEY)) return // 이미 마이그레이션 완료
+
   const keysToRemove = []
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
@@ -14,8 +17,7 @@ const clearOldData = () => {
     }
   }
   keysToRemove.forEach(key => localStorage.removeItem(key))
-  // 현재 키도 비우기 (완전 초기화)
-  localStorage.removeItem(STORAGE_KEY)
+  localStorage.setItem(MIGRATION_KEY, 'true')
 }
 
 // 앱 시작 시 이전 데이터 삭제
