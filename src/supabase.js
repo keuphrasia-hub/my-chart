@@ -47,6 +47,7 @@ export const loadAllPatients = async (userId) => {
       treatmentStartDate: row.treatment_start_date,
       treatmentPeriod: row.treatment_period,
       status: row.status || 'active',
+      hasHerbal: row.has_herbal !== false, // 기본값 true (기존 환자 호환)
       herbal: row.herbal || [
         { month: 1, date: '', seoljin: false, omnifit: false },
         { month: 2, date: '', seoljin: false, omnifit: false },
@@ -87,6 +88,7 @@ export const insertPatient = async (userId, patient) => {
         treatment_start_date: patient.treatmentStartDate,
         treatment_period: patient.treatmentPeriod,
         status: patient.status || 'active',
+        has_herbal: patient.hasHerbal !== false, // 탕약/환약 처방 여부
         herbal: patient.herbal,
         weekly_visits: patient.weeklyVisits,
         review: patient.review || '',
@@ -122,6 +124,7 @@ export const updatePatient = async (patientId, updates) => {
     if (updates.treatmentStartDate !== undefined) dbUpdates.treatment_start_date = updates.treatmentStartDate
     if (updates.treatmentPeriod !== undefined) dbUpdates.treatment_period = updates.treatmentPeriod
     if (updates.status !== undefined) dbUpdates.status = updates.status
+    if (updates.hasHerbal !== undefined) dbUpdates.has_herbal = updates.hasHerbal
     if (updates.herbal !== undefined) dbUpdates.herbal = updates.herbal
     if (updates.weeklyVisits !== undefined) dbUpdates.weekly_visits = updates.weeklyVisits
     if (updates.review !== undefined) dbUpdates.review = updates.review
@@ -183,6 +186,7 @@ const rowToPatient = (row) => ({
   treatmentStartDate: row.treatment_start_date,
   treatmentPeriod: row.treatment_period,
   status: row.status || 'active',
+  hasHerbal: row.has_herbal !== false, // 기본값 true
   herbal: row.herbal || [],
   weeklyVisits: row.weekly_visits || [],
   review: row.review || '',

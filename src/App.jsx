@@ -170,6 +170,7 @@ function App() {
     contact: '',
     symptoms: '',
     treatmentPeriod: '',
+    hasHerbal: true, // 탕약/환약 처방 여부 (기본: 처방받음)
   })
 
   const channelRef = useRef(null)
@@ -256,6 +257,7 @@ function App() {
       id: Date.now(),
       ...newPatient,
       status: 'active', // 진행중
+      hasHerbal: newPatient.hasHerbal, // 탕약/환약 처방 여부
       herbal: [
         { month: 1, date: '', seoljin: false, omnifit: false },
         { month: 2, date: '', seoljin: false, omnifit: false },
@@ -287,6 +289,7 @@ function App() {
       contact: '',
       symptoms: '',
       treatmentPeriod: '',
+      hasHerbal: true,
     })
     setShowAddModal(false)
   }
@@ -517,7 +520,7 @@ function App() {
                   <th colSpan={18} className="px-2 py-2 text-center font-bold text-amber-800 bg-amber-100 border-r-2 border-stone-400">
                     탕약/환약관리
                   </th>
-                  <th colSpan={24} className="px-2 py-2 text-center font-bold text-blue-800 bg-blue-100 border-r-2 border-stone-400">
+                  <th rowSpan={2} colSpan={24} className="px-2 py-2 text-center font-bold text-blue-800 bg-blue-100 border-r-2 border-stone-400 align-middle">
                     치료내원관리
                   </th>
                   <th rowSpan={3} className="px-2 py-2 text-center font-bold text-stone-700 bg-stone-300 border-r-2 border-stone-400 align-middle whitespace-nowrap">후기</th>
@@ -536,16 +539,6 @@ function App() {
                       {m}개월
                     </th>
                   ))}
-                  {/* 주차별 내원 - 6개월(24주) */}
-                  {[1, 2, 3, 4, 5, 6].map(month => (
-                    <th
-                      key={month}
-                      colSpan={4}
-                      className={`px-1 py-1 text-center font-medium text-stone-600 text-xs ${month % 2 === 0 ? 'bg-blue-50' : 'bg-blue-100/50'} ${month < 6 ? 'border-r border-blue-200' : 'border-r-2 border-stone-400'}`}
-                    >
-                      {month}개월
-                    </th>
-                  ))}
                 </tr>
                 {/* 서브헤더 행 */}
                 <tr className="bg-stone-50 text-xs">
@@ -558,17 +551,14 @@ function App() {
                     </React.Fragment>
                   ))}
                   {/* 주차 번호 */}
-                  {Array.from({ length: 24 }, (_, i) => {
-                    const monthGroup = Math.floor(i / 4) + 1
-                    return (
-                      <th
-                        key={i}
-                        className={`px-1 py-1 text-center text-stone-500 min-w-[38px] whitespace-nowrap ${monthGroup % 2 === 0 ? 'bg-blue-50' : 'bg-blue-100/50'} ${(i + 1) % 4 === 0 && i < 23 ? 'border-r border-blue-200' : ''} ${i === 23 ? 'border-r-2 border-stone-400' : ''}`}
-                      >
-                        {i + 1}주
-                      </th>
-                    )
-                  })}
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <th
+                      key={i}
+                      className={`px-1 py-1 text-center text-stone-500 min-w-[38px] whitespace-nowrap bg-blue-50 ${i === 23 ? 'border-r-2 border-stone-400' : ''}`}
+                    >
+                      {i + 1}주
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
@@ -595,6 +585,7 @@ function App() {
                     const currentWeekIdx = getCurrentWeekIndex(patient.treatmentStartDate)
                     const treatmentMonths = getTreatmentMonths(patient.treatmentPeriod)
                     const treatmentWeeks = treatmentMonths * 4 // 1개월 = 4주
+                    const patientHasHerbal = patient.hasHerbal !== false // 기본값 true (기존 환자 호환)
 
                     const handleRowClick = (e) => {
                       // input, select, button, label 클릭 시에는 모달 열지 않음
@@ -713,7 +704,7 @@ function App() {
                         </td>
                         {/* 탕약 복약 현황 (6개월) - 각 월별로 날짜/설진/옴니핏 (개별 셀) */}
                         {[0, 1, 2, 3, 4, 5].map(monthIdx => {
-                          const isDisabled = monthIdx >= treatmentMonths
+                          const isDisabled = !patientHasHerbal || monthIdx >= treatmentMonths // 탕약처방 안받으면 전체 비활성화
                           const hasDate = herbal[monthIdx]?.date
                           return (
                             <React.Fragment key={`${patient.id}-herb-${monthIdx}`}>
@@ -781,7 +772,6 @@ function App() {
                         })}
                         {/* 주차별 내원 */}
                         {Array.from({ length: 24 }, (_, weekIdx) => {
-                          const monthGroup = Math.floor(weekIdx / 4) + 1
                           const isCurrentWeek = weekIdx === currentWeekIdx
                           const yearWeekCode = getWeekYearCode(patient.treatmentStartDate, weekIdx)
                           const isDisabled = weekIdx >= treatmentWeeks
@@ -811,10 +801,8 @@ function App() {
                                     ? 'bg-red-50 cursor-pointer hover:bg-gradient-to-b hover:from-stone-100/60 hover:via-white/80 hover:to-stone-100/60 hover:shadow-[inset_0_0_10px_rgba(120,113,108,0.15)]'
                                     : isCurrentWeek
                                       ? 'bg-green-100'
-                                      : monthGroup % 2 === 0
-                                        ? 'bg-blue-50/50'
-                                        : 'bg-blue-100/30'
-                              } ${(weekIdx + 1) % 4 === 0 && weekIdx < 23 ? 'border-r border-blue-200' : ''} ${weekIdx === 23 ? 'border-r-2 border-stone-400' : ''}`}
+                                      : 'bg-blue-50/30'
+                              } ${weekIdx === 23 ? 'border-r-2 border-stone-400' : ''}`}
                             >
                               {isDisabled ? (
                                 <div className="flex flex-col items-center opacity-30">
@@ -1062,6 +1050,18 @@ function App() {
                   </select>
                 </div>
               </div>
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newPatient.hasHerbal}
+                    onChange={(e) => setNewPatient({ ...newPatient, hasHerbal: e.target.checked })}
+                    className="w-4 h-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+                  />
+                  <span className="text-sm font-medium text-stone-700">탕약/환약 처방</span>
+                  <span className="text-xs text-stone-500">(체크 해제 시 내원치료만)</span>
+                </label>
+              </div>
             </div>
 
             <div className="flex gap-2 pt-4">
@@ -1257,6 +1257,23 @@ function App() {
                       <option value="dropout">이탈</option>
                     </select>
                   </div>
+                </div>
+                {/* 탕약/환약 처방 여부 */}
+                <div className="mt-3 pt-3 border-t border-blue-200">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedPatient.hasHerbal !== false}
+                      onChange={(e) => {
+                        const updated = { ...selectedPatient, hasHerbal: e.target.checked }
+                        setSelectedPatient(updated)
+                        updatePatientField(selectedPatient.id, 'hasHerbal', e.target.checked)
+                      }}
+                      className="w-4 h-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span className="text-sm font-medium text-stone-700">탕약/환약 처방</span>
+                    <span className="text-xs text-stone-500">(체크 해제 시 내원치료만)</span>
+                  </label>
                 </div>
               </div>
 
