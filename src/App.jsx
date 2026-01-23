@@ -1,27 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { getUserId, loadAllPatients, insertPatient, updatePatient as updatePatientInDB, deletePatientFromDB, subscribeToPatients, unsubscribe } from './supabase'
 
-// localStorage 키 (v11: 완전 초기화)
-const STORAGE_KEY = 'bonhyang_patients_v11'
-const MIGRATION_KEY = 'bonhyang_clean_v11'
+// localStorage 키
+const STORAGE_KEY = 'bonhyang_patients_v12'
 
-// 모든 기존 데이터 삭제 (한 번만 실행)
-const clearAllOldData = () => {
-  if (localStorage.getItem(MIGRATION_KEY)) return
-
-  // bonhyang 관련 모든 키 삭제
+// 앱 시작 시 기존 캐시 정리
+const cleanupOldCache = () => {
+  // 이전 버전 데이터 삭제
   const keysToRemove = []
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
-    if (key && key.startsWith('bonhyang')) {
+    if (key && (
+      key.startsWith('bonhyang_patients_v') && key !== STORAGE_KEY ||
+      key === 'hanuiwon_user_id' ||
+      key.startsWith('bonhyang_migrated') ||
+      key.startsWith('bonhyang_clean')
+    )) {
       keysToRemove.push(key)
     }
   }
   keysToRemove.forEach(key => localStorage.removeItem(key))
-  localStorage.setItem(MIGRATION_KEY, 'true')
 }
 
-clearAllOldData()
+cleanupOldCache()
 
 // 초기 데이터 로드
 const loadPatients = () => {
@@ -148,8 +149,10 @@ function App() {
   const [passwordError, setPasswordError] = useState(false)
 
   const [patients, setPatients] = useState(loadPatients)
-  const [userId, setUserId] = useState('')
   const [syncStatus, setSyncStatus] = useState('idle')
+
+  // 공유 userId (항상 동일)
+  const userId = getUserId()
   const [showAddModal, setShowAddModal] = useState(false)
   const [filterDoctor, setFilterDoctor] = useState('전체')
   const [activeTab, setActiveTab] = useState('active')
@@ -178,14 +181,10 @@ function App() {
     if (!isAuthenticated) return // 로그인 안됐으면 실행 안함
 
     const initCloud = async () => {
-      const id = getUserId()
-      setUserId(id)
       setSyncStatus('syncing')
 
-      // 로컬 데이터가 없으면 샘플 데이터 로드
-      // 샘플 데이터 로드 제거됨 - 빈 상태로 시작
-
-      const cloudData = await loadAllPatients(id)
+      // userId는 항상 'bonhyang_clinic_shared' (getUserId()로 가져옴)
+      const cloudData = await loadAllPatients(userId)
       if (cloudData && cloudData.length > 0) {
         const currentLocal = loadPatients()
         if (currentLocal.length === 0) {
@@ -204,7 +203,7 @@ function App() {
       setSyncStatus('synced')
 
       // Realtime 구독
-      channelRef.current = subscribeToPatients(id, {
+      channelRef.current = subscribeToPatients(userId, {
         onInsert: (newPatient) => {
           if (!isSavingRef.current) {
             setPatients(prev => {
