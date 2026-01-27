@@ -167,6 +167,7 @@ function App() {
     firstVisitDate: getTodayDate(),
     treatmentStartDate: getTodayDate(),
     name: '',
+    chartNumber: '',
     contact: '',
     symptoms: '',
     treatmentPeriod: '',
@@ -286,6 +287,7 @@ function App() {
       firstVisitDate: getTodayDate(),
       treatmentStartDate: getTodayDate(),
       name: '',
+      chartNumber: '',
       contact: '',
       symptoms: '',
       treatmentPeriod: '',
@@ -513,7 +515,9 @@ function App() {
                   {/* 상태 - 3행 병합, 고정열 */}
                   <th rowSpan={3} className="sticky left-0 bg-stone-300 z-10 px-2 py-2 text-center font-bold text-stone-700 align-middle min-w-[60px] w-[60px] whitespace-nowrap">상태</th>
                   {/* 환자명 - 3행 병합, 고정열 */}
-                  <th rowSpan={3} className="sticky left-[60px] bg-stone-300 z-10 px-2 py-2 text-center font-bold text-stone-700 align-middle min-w-[80px] whitespace-nowrap border-r border-stone-400">환자명</th>
+                  <th rowSpan={3} className="sticky left-[60px] bg-stone-300 z-10 px-2 py-2 text-center font-bold text-stone-700 align-middle min-w-[80px] whitespace-nowrap">환자명</th>
+                  {/* 차트번호 - 3행 병합, 고정열 */}
+                  <th rowSpan={3} className="sticky left-[140px] bg-stone-300 z-10 px-2 py-2 text-center font-bold text-stone-700 align-middle min-w-[80px] whitespace-nowrap border-r border-stone-400">차트번호</th>
                   <th colSpan={5} className="bg-stone-300 border-r-2 border-stone-400 px-2 py-2 text-center font-bold text-stone-700">
                     기본정보
                   </th>
@@ -619,10 +623,20 @@ function App() {
                           </select>
                         </td>
                         {/* 환자명 - 2열 고정 */}
-                        <td className="px-2 py-2 text-center font-medium sticky left-[60px] bg-white z-10 group-hover:bg-stone-100/70 transition-colors duration-200 border-r border-stone-400">
+                        <td className="px-2 py-2 text-center font-medium sticky left-[60px] bg-white z-10 group-hover:bg-stone-100/70 transition-colors duration-200">
                           <span className="px-1 py-1 text-sm font-medium text-amber-800 hover:text-amber-900">
                             {patient.name || '(이름없음)'}
                           </span>
+                        </td>
+                        {/* 차트번호 - 3열 고정 */}
+                        <td className="px-2 py-2 text-center sticky left-[140px] bg-white z-10 group-hover:bg-stone-100/70 transition-colors duration-200 border-r border-stone-400">
+                          <input
+                            type="text"
+                            value={patient.chartNumber || ''}
+                            onChange={(e) => updatePatientField(patient.id, 'chartNumber', e.target.value)}
+                            className="w-20 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm text-center focus:border-stone-400 focus:outline-none"
+                            placeholder="-"
+                          />
                         </td>
                         {/* 담당의 */}
                         <td className="px-2 py-2 text-center">
@@ -973,6 +987,16 @@ function App() {
                 />
               </div>
               <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">차트번호</label>
+                <input
+                  type="text"
+                  value={newPatient.chartNumber}
+                  onChange={(e) => setNewPatient({ ...newPatient, chartNumber: e.target.value })}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                  placeholder="예: 12345"
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-stone-700 mb-1">연락처</label>
                 <input
                   type="text"
@@ -1112,6 +1136,20 @@ function App() {
                         updatePatientField(selectedPatient.id, 'name', e.target.value)
                       }}
                       className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">차트번호</label>
+                    <input
+                      type="text"
+                      value={selectedPatient.chartNumber || ''}
+                      onChange={(e) => {
+                        const updated = { ...selectedPatient, chartNumber: e.target.value }
+                        setSelectedPatient(updated)
+                        updatePatientField(selectedPatient.id, 'chartNumber', e.target.value)
+                      }}
+                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                      placeholder="예: 12345"
                     />
                   </div>
                   <div>
