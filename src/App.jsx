@@ -130,6 +130,9 @@ const REVIEW_OPTIONS = [
   { value: 'video_private', label: '비공개영상+수기' },
 ]
 
+// 직접 입력 옵션 값
+const CUSTOM_INPUT = '__custom__'
+
 // 치료기간에서 개월 수 추출
 const getTreatmentMonths = (treatmentPeriod) => {
   if (!treatmentPeriod) return 6 // 기본값 6개월
@@ -160,6 +163,7 @@ function App() {
   const [missedReasonModal, setMissedReasonModal] = useState(null) // { patientId, weekIdx, reason }
   const [isListCollapsed, setIsListCollapsed] = useState(false) // 목록 접기/펼치기
   const [visibleRows, setVisibleRows] = useState(10) // 표시할 행 수
+  const [customDoctorMode, setCustomDoctorMode] = useState(false) // 직접 입력 모드
 
   // 새 환자 폼 - 모든 hooks는 조건문 전에 선언
   const [newPatient, setNewPatient] = useState({
@@ -177,6 +181,9 @@ function App() {
   const channelRef = useRef(null)
   const isSavingRef = useRef(false)
   const debounceRef = useRef(null)
+
+  // 기존 원장 목록 (환자 데이터에서 추출)
+  const existingDoctors = [...new Set(patients.map(p => p.doctor).filter(Boolean))]
 
   // 초기 로드 - 인증 후에도 실행되도록 isAuthenticated 의존성 추가
   useEffect(() => {
@@ -293,6 +300,7 @@ function App() {
       treatmentPeriod: '',
       hasHerbal: true,
     })
+    setCustomDoctorMode(false)
     setShowAddModal(false)
   }
 
@@ -358,8 +366,8 @@ function App() {
     }
   }
 
-  // 담당의 목록
-  const doctors = ['전체', ...new Set(patients.map(p => p.doctor).filter(Boolean))]
+  // 담당의 목록 (필터용)
+  const doctors = ['전체', ...existingDoctors]
 
   // 필터링된 환자 (탭 + 담당의)
   const filteredPatients = patients
@@ -532,7 +540,7 @@ function App() {
                 </tr>
                 {/* 컬럼 헤더 행 */}
                 <tr>
-                  <th rowSpan={2} className="px-2 py-2 text-center font-medium text-stone-700 whitespace-nowrap align-middle bg-stone-100">담당의</th>
+                  <th rowSpan={2} className="px-2 py-2 text-center font-medium text-stone-700 whitespace-nowrap align-middle bg-stone-100">담당원장</th>
                   <th rowSpan={2} className="px-2 py-2 text-center font-medium text-stone-700 whitespace-nowrap align-middle bg-stone-100">초진일</th>
                   <th rowSpan={2} className="px-2 py-2 text-center font-medium text-stone-700 whitespace-nowrap align-middle bg-stone-100">연락처</th>
                   <th rowSpan={2} className="px-2 py-2 text-center font-medium text-stone-700 whitespace-nowrap min-w-[100px] align-middle bg-stone-100">증상</th>
@@ -638,14 +646,28 @@ function App() {
                             placeholder="-"
                           />
                         </td>
-                        {/* 담당의 */}
+                        {/* 담당원장 */}
                         <td className="px-2 py-2 text-center">
-                          <input
-                            type="text"
+                          <select
                             value={patient.doctor || ''}
-                            onChange={(e) => updatePatientField(patient.id, 'doctor', e.target.value)}
-                            className="w-16 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm text-center focus:border-stone-400 focus:outline-none"
-                          />
+                            onChange={(e) => {
+                              if (e.target.value === CUSTOM_INPUT) {
+                                const newDoctor = prompt('새 원장 이름을 입력하세요:')
+                                if (newDoctor && newDoctor.trim()) {
+                                  updatePatientField(patient.id, 'doctor', newDoctor.trim())
+                                }
+                              } else {
+                                updatePatientField(patient.id, 'doctor', e.target.value)
+                              }
+                            }}
+                            className="w-20 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent"
+                          >
+                            <option value="">-</option>
+                            {existingDoctors.map(d => (
+                              <option key={d} value={d}>{d}</option>
+                            ))}
+                            <option value={CUSTOM_INPUT}>+ 직접입력</option>
+                          </select>
                         </td>
                         {/* 초진일 */}
                         <td className="px-2 py-2 text-center">
@@ -969,13 +991,36 @@ function App() {
 
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">담당의</label>
-                <input
-                  type="text"
-                  value={newPatient.doctor}
-                  onChange={(e) => setNewPatient({ ...newPatient, doctor: e.target.value })}
-                  className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent"
-                />
+                <label className="block text-sm font-medium text-stone-700 mb-1">담당 원장</label>
+                {customDoctorMode || existingDoctors.length === 0 ? (
+                  <input
+                    type="text"
+                    value={newPatient.doctor}
+                    onChange={(e) => setNewPatient({ ...newPatient, doctor: e.target.value })}
+                    className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent"
+                    placeholder="원장 이름 입력"
+                    autoFocus
+                  />
+                ) : (
+                  <select
+                    value={newPatient.doctor || ''}
+                    onChange={(e) => {
+                      if (e.target.value === CUSTOM_INPUT) {
+                        setCustomDoctorMode(true)
+                        setNewPatient({ ...newPatient, doctor: '' })
+                      } else {
+                        setNewPatient({ ...newPatient, doctor: e.target.value })
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                  >
+                    <option value="">선택</option>
+                    {existingDoctors.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                    <option value={CUSTOM_INPUT}>+ 직접 입력</option>
+                  </select>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-1">환자명 *</label>
@@ -1096,7 +1141,21 @@ function App() {
                 등록
               </button>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setShowAddModal(false)
+                  setCustomDoctorMode(false)
+                  setNewPatient({
+                    doctor: '',
+                    firstVisitDate: getTodayDate(),
+                    treatmentStartDate: getTodayDate(),
+                    name: '',
+                    chartNumber: '',
+                    contact: '',
+                    symptoms: '',
+                    treatmentPeriod: '',
+                    hasHerbal: true,
+                  })
+                }}
                 className="flex-1 py-2 bg-stone-200 text-stone-700 rounded-lg hover:bg-stone-300 transition"
               >
                 취소
@@ -1153,17 +1212,31 @@ function App() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-stone-500 mb-1">담당의</label>
-                    <input
-                      type="text"
+                    <label className="block text-xs text-stone-500 mb-1">담당 원장</label>
+                    <select
                       value={selectedPatient.doctor || ''}
                       onChange={(e) => {
-                        const updated = { ...selectedPatient, doctor: e.target.value }
-                        setSelectedPatient(updated)
-                        updatePatientField(selectedPatient.id, 'doctor', e.target.value)
+                        if (e.target.value === CUSTOM_INPUT) {
+                          const newDoctor = prompt('새 원장 이름을 입력하세요:')
+                          if (newDoctor && newDoctor.trim()) {
+                            const updated = { ...selectedPatient, doctor: newDoctor.trim() }
+                            setSelectedPatient(updated)
+                            updatePatientField(selectedPatient.id, 'doctor', newDoctor.trim())
+                          }
+                        } else {
+                          const updated = { ...selectedPatient, doctor: e.target.value }
+                          setSelectedPatient(updated)
+                          updatePatientField(selectedPatient.id, 'doctor', e.target.value)
+                        }
                       }}
-                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent"
-                    />
+                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                    >
+                      <option value="">선택</option>
+                      {existingDoctors.map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                      <option value={CUSTOM_INPUT}>+ 직접 입력</option>
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs text-stone-500 mb-1">연락처</label>
