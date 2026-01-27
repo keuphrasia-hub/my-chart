@@ -133,6 +133,13 @@ const REVIEW_OPTIONS = [
 // 진료실 옵션
 const ROOM_OPTIONS = ['1진료실', '2진료실', '3진료실']
 
+// 탕약/환약 타입 옵션
+const HERBAL_TYPE_OPTIONS = [
+  { value: '', label: '-' },
+  { value: 'tang', label: '탕약' },
+  { value: 'hwan', label: '환약' },
+]
+
 // 치료기간에서 개월 수 추출
 const getTreatmentMonths = (treatmentPeriod) => {
   if (!treatmentPeriod) return 6 // 기본값 6개월
@@ -175,12 +182,25 @@ function App() {
     symptoms: '',
     treatmentPeriod: '',
     hasHerbal: true, // 탕약/환약 처방 여부 (기본: 처방받음)
+    herbalType: '', // 탕약/환약 종류
   })
 
   const channelRef = useRef(null)
   const isSavingRef = useRef(false)
   const debounceRef = useRef(null)
 
+  // ESC 키로 모달 닫기
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        if (missedReasonModal) setMissedReasonModal(null)
+        else if (selectedPatient) setSelectedPatient(null)
+        else if (showAddModal) setShowAddModal(false)
+      }
+    }
+    window.addEventListener('keydown', handleEsc)
+    return () => window.removeEventListener('keydown', handleEsc)
+  }, [showAddModal, selectedPatient, missedReasonModal])
 
   // 초기 로드 - 인증 후에도 실행되도록 isAuthenticated 의존성 추가
   useEffect(() => {
@@ -263,6 +283,7 @@ function App() {
       ...newPatient,
       status: 'active', // 진행중
       hasHerbal: newPatient.hasHerbal, // 탕약/환약 처방 여부
+      herbalType: newPatient.herbalType, // 탕약/환약 종류
       herbal: [
         { month: 1, date: '', seoljin: false, omnifit: false },
         { month: 2, date: '', seoljin: false, omnifit: false },
@@ -296,6 +317,7 @@ function App() {
       symptoms: '',
       treatmentPeriod: '',
       hasHerbal: true,
+      herbalType: '',
     })
     setShowAddModal(false)
   }
@@ -473,15 +495,6 @@ function App() {
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <select
-              value={filterDoctor}
-              onChange={(e) => setFilterDoctor(e.target.value)}
-              className="px-3 py-1.5 border border-stone-300 rounded-lg text-sm"
-            >
-              {doctors.map(d => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
             <button
               onClick={() => setShowAddModal(true)}
               className="px-4 py-2 bg-stone-700 text-white rounded-lg hover:bg-stone-800 transition text-sm font-medium"
@@ -506,6 +519,23 @@ function App() {
             </button>
           ))}
         </div>
+        {/* 진료실 필터 */}
+        <div className="px-4 pb-2 flex gap-2 border-t border-stone-200 pt-2">
+          <span className="text-sm text-stone-500 py-1">진료실:</span>
+          {doctors.map(room => (
+            <button
+              key={room}
+              onClick={() => setFilterDoctor(room)}
+              className={`px-3 py-1 rounded-full text-sm font-medium transition ${
+                filterDoctor === room
+                  ? 'bg-amber-500 text-white'
+                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              {room}
+            </button>
+          ))}
+        </div>
       </header>
 
       {/* 메인 테이블 */}
@@ -525,6 +555,7 @@ function App() {
                   <th colSpan={5} className="bg-stone-300 border-r-2 border-stone-400 px-2 py-2 text-center font-bold text-stone-700">
                     기본정보
                   </th>
+                  <th rowSpan={3} className="px-2 py-2 text-center font-bold text-amber-800 bg-amber-200 align-middle whitespace-nowrap">약종류</th>
                   <th colSpan={18} className="px-2 py-2 text-center font-bold text-amber-800 bg-amber-100 border-r-2 border-stone-400">
                     탕약/환약관리
                   </th>
@@ -723,6 +754,21 @@ function App() {
                               ))}
                             </select>
                           </div>
+                        </td>
+                        {/* 약 종류 (탕약/환약) */}
+                        <td className="px-2 py-2 text-center bg-amber-50/30">
+                          <select
+                            value={patient.herbalType || ''}
+                            onChange={(e) => updatePatientField(patient.id, 'herbalType', e.target.value)}
+                            className={`w-14 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-xs text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent ${
+                              patient.herbalType === 'tang' ? 'text-amber-700 font-medium' :
+                              patient.herbalType === 'hwan' ? 'text-green-700 font-medium' : ''
+                            }`}
+                          >
+                            {HERBAL_TYPE_OPTIONS.map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
                         </td>
                         {/* 탕약 복약 현황 (6개월) - 각 월별로 날짜/설진/옴니핏 (개별 셀) */}
                         {[0, 1, 2, 3, 4, 5].map(monthIdx => {
@@ -1098,6 +1144,20 @@ function App() {
                   <span className="text-xs text-stone-500">(체크 해제 시 내원치료만)</span>
                 </label>
               </div>
+              {newPatient.hasHerbal && (
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">약 종류</label>
+                  <select
+                    value={newPatient.herbalType || ''}
+                    onChange={(e) => setNewPatient({ ...newPatient, herbalType: e.target.value })}
+                    className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                  >
+                    <option value="">선택</option>
+                    <option value="tang">탕약</option>
+                    <option value="hwan">환약</option>
+                  </select>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-2 pt-4">
@@ -1120,6 +1180,7 @@ function App() {
                     symptoms: '',
                     treatmentPeriod: '',
                     hasHerbal: true,
+                    herbalType: '',
                   })
                 }}
                 className="flex-1 py-2 bg-stone-200 text-stone-700 rounded-lg hover:bg-stone-300 transition"
@@ -1341,6 +1402,24 @@ function App() {
                     <span className="text-sm font-medium text-stone-700">탕약/환약 처방</span>
                     <span className="text-xs text-stone-500">(체크 해제 시 내원치료만)</span>
                   </label>
+                  {selectedPatient.hasHerbal !== false && (
+                    <div className="mt-2">
+                      <label className="block text-xs text-stone-500 mb-1">약 종류</label>
+                      <select
+                        value={selectedPatient.herbalType || ''}
+                        onChange={(e) => {
+                          const updated = { ...selectedPatient, herbalType: e.target.value }
+                          setSelectedPatient(updated)
+                          updatePatientField(selectedPatient.id, 'herbalType', e.target.value)
+                        }}
+                        className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                      >
+                        <option value="">선택</option>
+                        <option value="tang">탕약</option>
+                        <option value="hwan">환약</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
               </div>
 
