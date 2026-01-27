@@ -130,8 +130,8 @@ const REVIEW_OPTIONS = [
   { value: 'video_private', label: '비공개영상+수기' },
 ]
 
-// 직접 입력 옵션 값
-const CUSTOM_INPUT = '__custom__'
+// 진료실 옵션
+const ROOM_OPTIONS = ['1진료실', '2진료실', '3진료실']
 
 // 치료기간에서 개월 수 추출
 const getTreatmentMonths = (treatmentPeriod) => {
@@ -163,8 +163,7 @@ function App() {
   const [missedReasonModal, setMissedReasonModal] = useState(null) // { patientId, weekIdx, reason }
   const [isListCollapsed, setIsListCollapsed] = useState(false) // 목록 접기/펼치기
   const [visibleRows, setVisibleRows] = useState(10) // 표시할 행 수
-  const [customDoctorMode, setCustomDoctorMode] = useState(false) // 직접 입력 모드
-
+  
   // 새 환자 폼 - 모든 hooks는 조건문 전에 선언
   const [newPatient, setNewPatient] = useState({
     doctor: '',
@@ -182,8 +181,6 @@ function App() {
   const isSavingRef = useRef(false)
   const debounceRef = useRef(null)
 
-  // 기존 원장 목록 (환자 데이터에서 추출)
-  const existingDoctors = [...new Set(patients.map(p => p.doctor).filter(Boolean))]
 
   // 초기 로드 - 인증 후에도 실행되도록 isAuthenticated 의존성 추가
   useEffect(() => {
@@ -300,7 +297,6 @@ function App() {
       treatmentPeriod: '',
       hasHerbal: true,
     })
-    setCustomDoctorMode(false)
     setShowAddModal(false)
   }
 
@@ -367,7 +363,7 @@ function App() {
   }
 
   // 담당의 목록 (필터용)
-  const doctors = ['전체', ...existingDoctors]
+  const doctors = ['전체', ...ROOM_OPTIONS]
 
   // 필터링된 환자 (탭 + 담당의)
   const filteredPatients = patients
@@ -650,23 +646,13 @@ function App() {
                         <td className="px-2 py-2 text-center">
                           <select
                             value={patient.doctor || ''}
-                            onChange={(e) => {
-                              if (e.target.value === CUSTOM_INPUT) {
-                                const newDoctor = prompt('새 원장 이름을 입력하세요:')
-                                if (newDoctor && newDoctor.trim()) {
-                                  updatePatientField(patient.id, 'doctor', newDoctor.trim())
-                                }
-                              } else {
-                                updatePatientField(patient.id, 'doctor', e.target.value)
-                              }
-                            }}
+                            onChange={(e) => updatePatientField(patient.id, 'doctor', e.target.value)}
                             className="w-20 px-1 py-1 border border-transparent hover:border-stone-300 rounded text-sm text-center focus:border-stone-400 focus:outline-none cursor-pointer bg-transparent"
                           >
                             <option value="">-</option>
-                            {existingDoctors.map(d => (
+                            {ROOM_OPTIONS.map(d => (
                               <option key={d} value={d}>{d}</option>
                             ))}
-                            <option value={CUSTOM_INPUT}>+ 직접입력</option>
                           </select>
                         </td>
                         {/* 초진일 */}
@@ -992,35 +978,16 @@ function App() {
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-1">담당 원장</label>
-                {customDoctorMode || existingDoctors.length === 0 ? (
-                  <input
-                    type="text"
-                    value={newPatient.doctor}
-                    onChange={(e) => setNewPatient({ ...newPatient, doctor: e.target.value })}
-                    className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent"
-                    placeholder="원장 이름 입력"
-                    autoFocus
-                  />
-                ) : (
-                  <select
-                    value={newPatient.doctor || ''}
-                    onChange={(e) => {
-                      if (e.target.value === CUSTOM_INPUT) {
-                        setCustomDoctorMode(true)
-                        setNewPatient({ ...newPatient, doctor: '' })
-                      } else {
-                        setNewPatient({ ...newPatient, doctor: e.target.value })
-                      }
-                    }}
-                    className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
-                  >
-                    <option value="">선택</option>
-                    {existingDoctors.map(d => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                    <option value={CUSTOM_INPUT}>+ 직접 입력</option>
-                  </select>
-                )}
+                <select
+                  value={newPatient.doctor || ''}
+                  onChange={(e) => setNewPatient({ ...newPatient, doctor: e.target.value })}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
+                >
+                  <option value="">선택</option>
+                  {ROOM_OPTIONS.map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-1">환자명 *</label>
@@ -1143,7 +1110,6 @@ function App() {
               <button
                 onClick={() => {
                   setShowAddModal(false)
-                  setCustomDoctorMode(false)
                   setNewPatient({
                     doctor: '',
                     firstVisitDate: getTodayDate(),
@@ -1216,26 +1182,16 @@ function App() {
                     <select
                       value={selectedPatient.doctor || ''}
                       onChange={(e) => {
-                        if (e.target.value === CUSTOM_INPUT) {
-                          const newDoctor = prompt('새 원장 이름을 입력하세요:')
-                          if (newDoctor && newDoctor.trim()) {
-                            const updated = { ...selectedPatient, doctor: newDoctor.trim() }
-                            setSelectedPatient(updated)
-                            updatePatientField(selectedPatient.id, 'doctor', newDoctor.trim())
-                          }
-                        } else {
-                          const updated = { ...selectedPatient, doctor: e.target.value }
-                          setSelectedPatient(updated)
-                          updatePatientField(selectedPatient.id, 'doctor', e.target.value)
-                        }
+                        const updated = { ...selectedPatient, doctor: e.target.value }
+                        setSelectedPatient(updated)
+                        updatePatientField(selectedPatient.id, 'doctor', e.target.value)
                       }}
                       className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-stone-500 focus:border-transparent cursor-pointer"
                     >
                       <option value="">선택</option>
-                      {existingDoctors.map(d => (
+                      {ROOM_OPTIONS.map(d => (
                         <option key={d} value={d}>{d}</option>
                       ))}
-                      <option value={CUSTOM_INPUT}>+ 직접 입력</option>
                     </select>
                   </div>
                   <div>
