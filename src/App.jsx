@@ -1039,42 +1039,45 @@ function App() {
                                 <span className="text-xs text-[#8B7E74]">-</span>
                               ) : (
                                 <div className="flex items-center justify-center gap-1">
-                                  {/* 날짜 */}
-                                  <span
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      const input = e.currentTarget.parentElement.querySelector('input[type="date"]')
-                                      if (input) input.showPicker()
-                                    }}
-                                    className={`text-[10px] cursor-pointer min-w-[28px] ${hasDate ? 'font-medium text-[#6D5548] hover:text-[#A14B42]' : 'text-[#8B7E74] hover:text-[#6D5548]'}`}
-                                  >
-                                    {hasDate ? formatDateShort(herbal[monthIdx].date) : '+'}
-                                  </span>
+                                  {/* 날짜 - 직접 보이는 input */}
                                   <input
                                     type="date"
                                     value={herbal[monthIdx]?.date || ''}
                                     onChange={(e) => {
                                       e.stopPropagation()
-                                      const newHerbal = [...herbal]
-                                      newHerbal[monthIdx] = { ...newHerbal[monthIdx], date: e.target.value }
-                                      updatePatientField(patient.id, 'herbal', newHerbal)
+                                      const currentHerbal = patient.herbal?.length >= 6 ? [...patient.herbal] : Array.from({ length: 6 }, (_, i) => ({ month: i + 1, date: '', seoljin: false, omnifit: false }))
+                                      currentHerbal[monthIdx] = { ...currentHerbal[monthIdx], date: e.target.value }
+                                      updatePatientField(patient.id, 'herbal', currentHerbal)
                                     }}
-                                    className="sr-only"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="w-[70px] text-[10px] px-1 py-0.5 border border-[#D6C6B0] rounded cursor-pointer focus:ring-1 focus:ring-[#6D5548]"
                                   />
                                   {/* 설진 */}
                                   <input
                                     type="checkbox"
                                     checked={herbal[monthIdx]?.seoljin || false}
-                                    onChange={() => toggleHerbal(patient.id, monthIdx, 'seoljin')}
-                                    className="w-3 h-3 rounded border-[#D6C6B0] text-[#A14B42] focus:ring-[#A14B42]"
+                                    onChange={(e) => {
+                                      e.stopPropagation()
+                                      const currentHerbal = patient.herbal?.length >= 6 ? [...patient.herbal] : Array.from({ length: 6 }, (_, i) => ({ month: i + 1, date: '', seoljin: false, omnifit: false }))
+                                      currentHerbal[monthIdx] = { ...currentHerbal[monthIdx], seoljin: !currentHerbal[monthIdx]?.seoljin }
+                                      updatePatientField(patient.id, 'herbal', currentHerbal)
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="w-3 h-3 rounded border-[#D6C6B0] text-[#A14B42] focus:ring-[#A14B42] cursor-pointer"
                                     title="설진"
                                   />
                                   {/* 옴니핏 */}
                                   <input
                                     type="checkbox"
                                     checked={herbal[monthIdx]?.omnifit || false}
-                                    onChange={() => toggleHerbal(patient.id, monthIdx, 'omnifit')}
-                                    className="w-3 h-3 rounded border-[#D6C6B0] text-[#5B8A5B] focus:ring-[#5B8A5B]"
+                                    onChange={(e) => {
+                                      e.stopPropagation()
+                                      const currentHerbal = patient.herbal?.length >= 6 ? [...patient.herbal] : Array.from({ length: 6 }, (_, i) => ({ month: i + 1, date: '', seoljin: false, omnifit: false }))
+                                      currentHerbal[monthIdx] = { ...currentHerbal[monthIdx], omnifit: !currentHerbal[monthIdx]?.omnifit }
+                                      updatePatientField(patient.id, 'herbal', currentHerbal)
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="w-3 h-3 rounded border-[#D6C6B0] text-[#5B8A5B] focus:ring-[#5B8A5B] cursor-pointer"
                                     title="옴니핏"
                                   />
                                 </div>
