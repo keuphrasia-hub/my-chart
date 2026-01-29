@@ -109,8 +109,8 @@ const getLastVisitDate = (treatmentStartDate, weeklyVisits) => {
   return lastDate.toISOString().split('T')[0]
 }
 
-// 기간 옵션 (개월) - 0~9개월
-const PERIOD_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+// 기간 옵션 (개월) - 0~6개월
+const PERIOD_OPTIONS = [0, 1, 2, 3, 4, 5, 6]
 
 // 치료간격 - 주수 옵션 (1~4주)
 const INTERVAL_WEEKS_OPTIONS = [1, 2, 3, 4]
