@@ -155,9 +155,10 @@ export const updatePatient = async (patientId, updates) => {
     if (updates.doctor !== undefined) dbUpdates.doctor = updates.doctor
     if (updates.contact !== undefined) dbUpdates.contact = updates.contact
     if (updates.symptoms !== undefined) dbUpdates.symptoms = updates.symptoms
-    if (updates.firstVisitDate !== undefined) dbUpdates.first_visit_date = updates.firstVisitDate
-    if (updates.treatmentStartDate !== undefined) dbUpdates.treatment_start_date = updates.treatmentStartDate
-    if (updates.treatmentPeriod !== undefined) dbUpdates.treatment_period = updates.treatmentPeriod
+    // 날짜 필드는 빈 문자열을 null로 변환
+    if (updates.firstVisitDate !== undefined) dbUpdates.first_visit_date = updates.firstVisitDate || null
+    if (updates.treatmentStartDate !== undefined) dbUpdates.treatment_start_date = updates.treatmentStartDate || null
+    if (updates.treatmentPeriod !== undefined) dbUpdates.treatment_period = updates.treatmentPeriod || null
     if (updates.prescriptionPeriod !== undefined) dbUpdates.prescription_period = updates.prescriptionPeriod
     if (updates.visitPeriod !== undefined) dbUpdates.visit_period = updates.visitPeriod
     if (updates.status !== undefined) dbUpdates.status = updates.status
@@ -169,7 +170,8 @@ export const updatePatient = async (patientId, updates) => {
     if (updates.medicineOnly !== undefined) dbUpdates.medicine_only = updates.medicineOnly
     if (updates.review !== undefined) dbUpdates.review = updates.review
     if (updates.missedReasons !== undefined) dbUpdates.missed_reasons = updates.missedReasons
-    if (updates.graduationDate !== undefined) dbUpdates.graduation_date = updates.graduationDate
+    // 졸업일도 빈 문자열을 null로 변환
+    if (updates.graduationDate !== undefined) dbUpdates.graduation_date = updates.graduationDate || null
 
     dbUpdates.updated_at = new Date().toISOString()
 
