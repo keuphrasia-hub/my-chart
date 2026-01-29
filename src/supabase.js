@@ -36,6 +36,16 @@ export const loadAllPatients = async (userId) => {
       return []
     }
 
+    // 원본 데이터 확인
+    if (data && data.length > 0) {
+      console.log('[Supabase] 원본 row 기간:', {
+        name: data[0].name,
+        treatment_period: data[0].treatment_period,
+        prescription_period: data[0].prescription_period,
+        visit_period: data[0].visit_period
+      })
+    }
+
     // DB 컬럼명을 JS 카멜케이스로 변환
     const patients = (data || []).map(row => ({
       id: row.id,
@@ -71,6 +81,15 @@ export const loadAllPatients = async (userId) => {
     }))
 
     console.log('[Supabase] 로드 성공:', patients.length, '명')
+    // 기간 필드 디버깅
+    if (patients.length > 0) {
+      console.log('[Supabase] 첫번째 환자 기간:', {
+        name: patients[0].name,
+        treatmentPeriod: patients[0].treatmentPeriod,
+        prescriptionPeriod: patients[0].prescriptionPeriod,
+        visitPeriod: patients[0].visitPeriod
+      })
+    }
     return patients
   } catch (err) {
     console.error('[Supabase] 연결 실패:', err)
