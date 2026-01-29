@@ -282,14 +282,23 @@ function App() {
           })
         },
         onUpdate: (updatedPatient) => {
+          console.log('[Realtime] onUpdate 수신:', updatedPatient.name, updatedPatient)
+          // 저장 중이면 무시 (내가 방금 저장한 데이터의 콜백)
+          if (isSavingRef.current) {
+            console.log('[Realtime] isSavingRef=true, 무시')
+            return
+          }
           setPatients(prev => {
+            const existing = prev.find(p => p.id === updatedPatient.id)
+            if (!existing) return prev
+            // 서버 데이터로 덮어쓰기 (기존 데이터와 merge하여 누락 필드 보존)
+            const merged = { ...existing, ...updatedPatient }
+            console.log('[Realtime] merged:', merged.herbal, merged.weeklyVisits)
             const updated = prev.map(p =>
-              p.id === updatedPatient.id
-                ? updatedPatient  // 전체 객체 교체 (Merge 금지)
-                : p
+              p.id === updatedPatient.id ? merged : p
             )
-            const newList = [...updated]  // 새 배열 복사본
-            savePatients(newList)         // localStorage 즉시 동기화
+            const newList = [...updated]
+            savePatients(newList)
             return newList
           })
         },
@@ -382,8 +391,9 @@ function App() {
     setShowAddModal(false)
   }
 
-  // 환자 업데이트 (디바운스)
-  const updatePatientField = (patientId, field, value) => {
+  // 환자 업데이트 (즉시 저장)
+  const updatePatientField = async (patientId, field, value) => {
+    // 1. 로컬 상태 즉시 업데이트
     setPatients(prev => {
       const updated = prev.map(p =>
         p.id === patientId ? { ...p, [field]: value } : p
@@ -392,14 +402,12 @@ function App() {
       return updated
     })
 
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(async () => {
-      if (userId) {
-        isSavingRef.current = true
-        await updatePatientInDB(patientId, { [field]: value })
-        isSavingRef.current = false
-      }
-    }, 300)  // 디바운스 시간 단축 (1000ms → 300ms)
+    // 2. 서버에 즉시 저장 (디바운스 제거)
+    if (userId) {
+      isSavingRef.current = true
+      await updatePatientInDB(patientId, { [field]: value })
+      isSavingRef.current = false
+    }
   }
 
   // 상태 변경 핸들러 (졸업 시 졸업일 자동 설정)
