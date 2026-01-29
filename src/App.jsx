@@ -559,6 +559,12 @@ function App() {
   const savePatientDetail = async () => {
     if (!editedPatient) return
 
+    console.log('[세부정보 저장] 기간:', {
+      treatmentPeriod: editedPatient.treatmentPeriod,
+      prescriptionPeriod: editedPatient.prescriptionPeriod,
+      visitPeriod: editedPatient.visitPeriod
+    })
+
     // 로컬 상태 업데이트 + localStorage 저장
     setPatients(prev => {
       const updated = prev.map(p =>
@@ -572,7 +578,8 @@ function App() {
     if (userId) {
       setSyncStatus('syncing')
       isSavingRef.current = true
-      await updatePatientInDB(editedPatient.id, editedPatient)
+      const result = await updatePatientInDB(editedPatient.id, editedPatient)
+      console.log('[세부정보 저장] DB 저장 결과:', result)
       isSavingRef.current = false
       setSyncStatus('synced')
     }

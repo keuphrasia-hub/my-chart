@@ -40,14 +40,18 @@ export const loadAllPatients = async (userId) => {
     const patients = (data || []).map(row => ({
       id: row.id,
       name: row.name,
+      chartNumber: row.chart_number || '',
       doctor: row.doctor,
       contact: row.contact,
       symptoms: row.symptoms,
       firstVisitDate: row.first_visit_date,
       treatmentStartDate: row.treatment_start_date,
-      treatmentPeriod: row.treatment_period,
+      treatmentPeriod: row.treatment_period ?? 3,
+      prescriptionPeriod: row.prescription_period ?? 3,
+      visitPeriod: row.visit_period ?? 3,
       status: row.status || 'active',
-      hasHerbal: row.has_herbal !== false, // 기본값 true (기존 환자 호환)
+      hasHerbal: row.has_herbal !== false, // 레거시 호환
+      herbalType: row.herbal_type || '',
       herbal: row.herbal || [
         { month: 1, date: '', seoljin: false, omnifit: false },
         { month: 2, date: '', seoljin: false, omnifit: false },
@@ -56,9 +60,13 @@ export const loadAllPatients = async (userId) => {
         { month: 5, date: '', seoljin: false, omnifit: false },
         { month: 6, date: '', seoljin: false, omnifit: false },
       ],
-      weeklyVisits: row.weekly_visits || Array(24).fill(false),
+      weeklyVisits: row.weekly_visits || Array(36).fill(null),
+      visitInterval: row.visit_interval || '1주에 1회',
+      skipWeeks: row.skip_weeks || [],
+      medicineOnly: row.medicine_only || false,
       review: row.review || '',
       missedReasons: row.missed_reasons || {},
+      graduationDate: row.graduation_date || '',
       createdAt: row.created_at,
     }))
 
@@ -81,18 +89,25 @@ export const insertPatient = async (userId, patient) => {
         id: patient.id,
         user_id: userId,
         name: patient.name,
+        chart_number: patient.chartNumber || '',
         doctor: patient.doctor,
         contact: patient.contact,
         symptoms: patient.symptoms,
         first_visit_date: patient.firstVisitDate,
         treatment_start_date: patient.treatmentStartDate,
         treatment_period: patient.treatmentPeriod,
+        prescription_period: patient.prescriptionPeriod,
+        visit_period: patient.visitPeriod,
         status: patient.status || 'active',
-        has_herbal: patient.hasHerbal !== false, // 탕약/환약 처방 여부
+        herbal_type: patient.herbalType || '',
         herbal: patient.herbal,
         weekly_visits: patient.weeklyVisits,
+        visit_interval: patient.visitInterval || '1주에 1회',
+        skip_weeks: patient.skipWeeks || [],
+        medicine_only: patient.medicineOnly || false,
         review: patient.review || '',
         missed_reasons: patient.missedReasons || {},
+        graduation_date: patient.graduationDate || null,
         created_at: patient.createdAt,
       })
 
@@ -117,18 +132,25 @@ export const updatePatient = async (patientId, updates) => {
     // JS 카멜케이스를 DB 스네이크케이스로 변환
     const dbUpdates = {}
     if (updates.name !== undefined) dbUpdates.name = updates.name
+    if (updates.chartNumber !== undefined) dbUpdates.chart_number = updates.chartNumber
     if (updates.doctor !== undefined) dbUpdates.doctor = updates.doctor
     if (updates.contact !== undefined) dbUpdates.contact = updates.contact
     if (updates.symptoms !== undefined) dbUpdates.symptoms = updates.symptoms
     if (updates.firstVisitDate !== undefined) dbUpdates.first_visit_date = updates.firstVisitDate
     if (updates.treatmentStartDate !== undefined) dbUpdates.treatment_start_date = updates.treatmentStartDate
     if (updates.treatmentPeriod !== undefined) dbUpdates.treatment_period = updates.treatmentPeriod
+    if (updates.prescriptionPeriod !== undefined) dbUpdates.prescription_period = updates.prescriptionPeriod
+    if (updates.visitPeriod !== undefined) dbUpdates.visit_period = updates.visitPeriod
     if (updates.status !== undefined) dbUpdates.status = updates.status
-    if (updates.hasHerbal !== undefined) dbUpdates.has_herbal = updates.hasHerbal
+    if (updates.herbalType !== undefined) dbUpdates.herbal_type = updates.herbalType
     if (updates.herbal !== undefined) dbUpdates.herbal = updates.herbal
     if (updates.weeklyVisits !== undefined) dbUpdates.weekly_visits = updates.weeklyVisits
+    if (updates.visitInterval !== undefined) dbUpdates.visit_interval = updates.visitInterval
+    if (updates.skipWeeks !== undefined) dbUpdates.skip_weeks = updates.skipWeeks
+    if (updates.medicineOnly !== undefined) dbUpdates.medicine_only = updates.medicineOnly
     if (updates.review !== undefined) dbUpdates.review = updates.review
     if (updates.missedReasons !== undefined) dbUpdates.missed_reasons = updates.missedReasons
+    if (updates.graduationDate !== undefined) dbUpdates.graduation_date = updates.graduationDate
 
     dbUpdates.updated_at = new Date().toISOString()
 
@@ -179,18 +201,26 @@ export const deletePatientFromDB = async (patientId) => {
 const rowToPatient = (row) => ({
   id: row.id,
   name: row.name,
+  chartNumber: row.chart_number || '',
   doctor: row.doctor,
   contact: row.contact,
   symptoms: row.symptoms,
   firstVisitDate: row.first_visit_date,
   treatmentStartDate: row.treatment_start_date,
-  treatmentPeriod: row.treatment_period,
+  treatmentPeriod: row.treatment_period ?? 3,
+  prescriptionPeriod: row.prescription_period ?? 3,
+  visitPeriod: row.visit_period ?? 3,
   status: row.status || 'active',
-  hasHerbal: row.has_herbal !== false, // 기본값 true
+  hasHerbal: row.has_herbal !== false, // 레거시 호환
+  herbalType: row.herbal_type || '',
   herbal: row.herbal || [],
-  weeklyVisits: row.weekly_visits || [],
+  weeklyVisits: row.weekly_visits || Array(36).fill(null),
+  visitInterval: row.visit_interval || '1주에 1회',
+  skipWeeks: row.skip_weeks || [],
+  medicineOnly: row.medicine_only || false,
   review: row.review || '',
   missedReasons: row.missed_reasons || {},
+  graduationDate: row.graduation_date || '',
   createdAt: row.created_at,
 })
 

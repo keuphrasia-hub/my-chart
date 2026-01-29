@@ -1,7 +1,28 @@
 @import "tailwindcss";
 
+:root {
+  /* 본향한의원 브랜드 컬러 팔레트 */
+  --color-primary: #6D5548;      /* 딥 브라운 - 메인 */
+  --color-primary-light: #8B7265; /* 라이트 브라운 */
+  --color-secondary: #D6C6B0;    /* 소프트 베이지 - 보조 */
+  --color-secondary-light: #E8DFD3; /* 라이트 베이지 */
+  --color-accent: #A14B42;       /* 포인트 레드 - 강조 */
+  --color-accent-light: #C4716A; /* 라이트 레드 */
+  --color-neutral: #8B7E74;      /* 웜 그레이 - 무채색 */
+  --color-neutral-light: #A9A099; /* 라이트 그레이 */
+  --color-background: #FDFBF8;   /* 아이보리 - 배경 */
+  --color-white: #FFFFFF;
+
+  /* 상태 색상 */
+  --color-success: #5B8A5B;      /* 내원/성공 - 올리브 그린 */
+  --color-success-light: #E8F0E8;
+  --color-danger: #A14B42;       /* 미내원/위험 - 포인트 레드 */
+  --color-danger-light: #F5E8E7;
+}
+
 body {
   font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', sans-serif;
+  background-color: var(--color-background);
 }
 
 /* Select 드롭다운 텍스트 중앙정렬 */
@@ -54,6 +75,50 @@ input.herbal-date:not([value=""]) {
   text-align: center;
   font-size: 11px;
   font-weight: 500;
-  color: #57534e;
+  color: var(--color-primary);
   letter-spacing: -0.5px;
+}
+
+/* 가로스크롤바 스타일링 */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-neutral) var(--color-secondary);
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  height: 10px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: var(--color-secondary);
+  border-radius: 5px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--color-neutral);
+  border-radius: 5px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+}
+
+/* 테이블 세로줄 강화 */
+table.border-collapse {
+  border-collapse: collapse;
+}
+
+table.border-collapse th,
+table.border-collapse td {
+  border-bottom: 1px solid var(--color-secondary);
+}
+
+/* 섹션 구분선 강조 */
+.border-r-2 {
+  border-right-width: 2px !important;
+}
+
+/* 고정열 그림자 */
+.sticky {
+  box-shadow: 2px 0 4px -2px rgba(109, 85, 72, 0.15);
 }
