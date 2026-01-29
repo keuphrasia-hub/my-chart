@@ -352,7 +352,11 @@ function App() {
       createdAt: new Date().toISOString(),
     }
 
-    setPatients(prev => [patient, ...prev])
+    setPatients(prev => {
+      const updated = [patient, ...prev]
+      savePatients(updated)
+      return updated
+    })
 
     if (userId) {
       setSyncStatus('syncing')
@@ -380,9 +384,13 @@ function App() {
 
   // 환자 업데이트 (디바운스)
   const updatePatientField = (patientId, field, value) => {
-    setPatients(prev => prev.map(p =>
-      p.id === patientId ? { ...p, [field]: value } : p
-    ))
+    setPatients(prev => {
+      const updated = prev.map(p =>
+        p.id === patientId ? { ...p, [field]: value } : p
+      )
+      savePatients(updated)  // localStorage 즉시 저장
+      return updated
+    })
 
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(async () => {
@@ -391,7 +399,7 @@ function App() {
         await updatePatientInDB(patientId, { [field]: value })
         isSavingRef.current = false
       }
-    }, 1000)
+    }, 300)  // 디바운스 시간 단축 (1000ms → 300ms)
   }
 
   // 상태 변경 핸들러 (졸업 시 졸업일 자동 설정)
@@ -412,9 +420,13 @@ function App() {
       }
     }
 
-    setPatients(prev => prev.map(p =>
-      p.id === patientId ? { ...p, ...updates } : p
-    ))
+    setPatients(prev => {
+      const updated = prev.map(p =>
+        p.id === patientId ? { ...p, ...updates } : p
+      )
+      savePatients(updated)
+      return updated
+    })
 
     if (userId) {
       isSavingRef.current = true
@@ -461,7 +473,11 @@ function App() {
   const deletePatient = async (patientId) => {
     if (!confirm('정말 삭제하시겠습니까?')) return
 
-    setPatients(prev => prev.filter(p => p.id !== patientId))
+    setPatients(prev => {
+      const updated = prev.filter(p => p.id !== patientId)
+      savePatients(updated)
+      return updated
+    })
     if (userId) {
       isSavingRef.current = true
       await deletePatientFromDB(patientId)
